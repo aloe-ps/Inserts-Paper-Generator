@@ -29,20 +29,23 @@
             height: 8px;
         }
         .preview-scroll::-webkit-scrollbar-track {
-            background: #e5e7eb; 
+            background: #f1f1f1; 
         }
         .preview-scroll::-webkit-scrollbar-thumb {
-            background: #9ca3af; 
+            background: #c1c1c1; 
             border-radius: 4px;
         }
-        .paper-shadow {
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0,0,0,0.05);
+        .preview-scroll::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8; 
         }
-        /* Hide number input arrows */
+        /* Hide number input spinners in some browsers to keep UI clean */
         input[type=number]::-webkit-inner-spin-button, 
         input[type=number]::-webkit-outer-spin-button { 
             -webkit-appearance: none; 
             margin: 0; 
+        }
+        input[type=number] {
+            -moz-appearance: textfield;
         }
     </style>
 </head>
@@ -51,547 +54,516 @@
 
     <script type="text/babel">
         const { useState, useEffect, useRef, useMemo } = React;
-        const { jsPDF } = window.jspdf;
 
-        // アイコン
-        const UploadIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>;
-        const TrashIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>;
-        const FileIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>;
-        const DownloadIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>;
-        const LoaderIcon = () => <svg className="animate-spin" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>;
+        // --- Icons ---
+        const UploadIcon = () => (
+            <svg className="w-8 h-8 text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+            </svg>
+        );
 
-        // 用紙サイズ定義 (mm)
-        const PAPER_SIZES = {
-            'A4': { width: 210, height: 297 },
-            'A3': { width: 297, height: 420 },
-            'B5': { width: 182, height: 257 },
-            'B4': { width: 257, height: 364 },
-            'Letter': { width: 215.9, height: 279.4 },
-        };
+        const TrashIcon = () => (
+            <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+            </svg>
+        );
 
-        const App = () => {
-            // --- State ---
-            // images: { id, src, width, height, originalName, originalSrc }
-            // originalSrcを追加して、回転変更時に劣化なく再生成できるようにする
-            const [images, setImages] = useState([]); 
-            const [isProcessing, setIsProcessing] = useState(false);
-            
-            const [settings, setSettings] = useState({
-                paperSize: 'A4',
-                targetHeight: 80, // mm
-                margin: 10,       // mm
-                gap: 5,           // mm
-                orientation: 'portrait' // 'portrait' | 'landscape'
-            });
-            
-            // UI用状態
-            const [displayUnit, setDisplayUnit] = useState('mm'); // 'mm' | 'cm'
-            const [previewScale, setPreviewScale] = useState(1.0);
-            
-            const [layoutPages, setLayoutPages] = useState([]);
-            const previewContainerRef = useRef(null);
+        const FileIcon = () => (
+            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+            </svg>
+        );
 
-            // --- 画像処理ロジック ---
+        const DownloadIcon = () => (
+            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+            </svg>
+        );
 
-            // 指定された向きに合わせて画像を処理するヘルパー関数
-            // originalImg: Imageオブジェクト (srcロード済み)
-            // targetOrientation: 'portrait' | 'landscape'
-            const applyOrientation = (originalImg, targetOrientation) => {
-                const w = originalImg.width;
-                const h = originalImg.height;
-                const isPortrait = h >= w;
-                const isTargetPortrait = targetOrientation === 'portrait';
+        const LoaderIcon = () => (
+            <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+        );
 
-                // 現在の向きとターゲットが一致している場合はそのまま
-                if (isPortrait === isTargetPortrait) {
-                    return {
-                        src: originalImg.src,
-                        width: w,
-                        height: h
-                    };
-                }
+        // --- Components ---
 
-                // 回転が必要な場合 (Canvasで90度回転)
-                const canvas = document.createElement('canvas');
-                canvas.width = h;
-                canvas.height = w;
-                const ctx = canvas.getContext('2d');
+        // 数値入力用ステッパーコンポーネント (New!)
+        const NumberStepper = ({ value, onChange, step, min = 0, unitLabel }) => {
+            const inputRef = useRef(null);
+
+            const handleDecrement = () => {
+                const current = parseFloat(value) || 0;
+                const stepNum = parseFloat(step) || 1;
+                let newVal = current - stepNum;
+                if (newVal < min) newVal = min;
                 
-                ctx.translate(canvas.width / 2, canvas.height / 2);
-                ctx.rotate(90 * Math.PI / 180);
-                ctx.drawImage(originalImg, -w / 2, -h / 2);
+                // 小数点の精度調整 (例: 0.1 + 0.2 = 0.3000000004 を防ぐ)
+                const precision = step.toString().split('.')[1]?.length || 0;
+                onChange(Number(newVal.toFixed(precision)));
+            };
+
+            const handleIncrement = () => {
+                const current = parseFloat(value) || 0;
+                const stepNum = parseFloat(step) || 1;
+                const newVal = current + stepNum;
                 
-                return {
-                    src: canvas.toDataURL('image/jpeg', 0.9),
-                    width: h, // 幅と高さが入れ替わる
-                    height: w
-                };
-            };
-
-            const processImageFile = (file) => {
-                return new Promise((resolve) => {
-                    const reader = new FileReader();
-                    reader.onload = (e) => {
-                        const originalSrc = e.target.result;
-                        const img = new Image();
-                        img.onload = () => {
-                            // 設定された向きに合わせて処理
-                            const processed = applyOrientation(img, settings.orientation);
-
-                            resolve({
-                                id: Math.random().toString(36).substr(2, 9),
-                                src: processed.src,
-                                width: processed.width,
-                                height: processed.height,
-                                originalSrc: originalSrc, // 元データを保持
-                                originalName: file.name
-                            });
-                        };
-                        img.src = originalSrc;
-                    };
-                    reader.readAsDataURL(file);
-                });
-            };
-
-            const handleFileUpload = async (e) => {
-                const files = Array.from(e.target.files);
-                if (files.length === 0) return;
-
-                setIsProcessing(true);
-                // 現在の設定(settings.orientation)を使って処理
-                const processedImages = await Promise.all(files.map(processImageFile));
-                setImages(prev => [...prev, ...processedImages]);
-                setIsProcessing(false);
-                e.target.value = ''; // Reset input
-            };
-
-            // 向き設定の変更ハンドラ
-            const handleOrientationChange = async (newOrientation) => {
-                if (newOrientation === settings.orientation) return;
-                
-                setIsProcessing(true);
-                
-                // 既存の画像をすべて再処理
-                const reprocessedImages = await Promise.all(images.map(async (item) => {
-                    return new Promise((resolve) => {
-                        const img = new Image();
-                        img.onload = () => {
-                            const processed = applyOrientation(img, newOrientation);
-                            resolve({
-                                ...item,
-                                src: processed.src,
-                                width: processed.width,
-                                height: processed.height
-                            });
-                        };
-                        // originalSrcがあればそれを使う（画質劣化防止）
-                        img.src = item.originalSrc || item.src;
-                    });
-                }));
-
-                setImages(reprocessedImages);
-                setSettings(prev => ({ ...prev, orientation: newOrientation }));
-                setIsProcessing(false);
-            };
-
-            const removeImage = (id) => {
-                setImages(prev => prev.filter(img => img.id !== id));
-            };
-
-            const clearAllImages = () => {
-                if(confirm("すべての画像を削除しますか？")) {
-                    setImages([]);
-                }
-            };
-
-            // --- レイアウト計算ロジック ---
-            useEffect(() => {
-                if (images.length === 0) {
-                    setLayoutPages([]);
-                    return;
-                }
-
-                const paper = PAPER_SIZES[settings.paperSize];
-                const contentWidth = paper.width - (settings.margin * 2);
-                const contentHeight = paper.height - (settings.margin * 2);
-                
-                const pages = [];
-                let currentPage = { items: [] };
-                let currentX = settings.margin;
-                let currentY = settings.margin;
-
-                images.forEach((img) => {
-                    // targetHeightに合わせてスケーリング
-                    const scaleFactor = settings.targetHeight / img.height;
-                    const displayWidth = img.width * scaleFactor;
-                    const displayHeight = settings.targetHeight;
-
-                    // 現在の行に入るかチェック
-                    if (currentX + displayWidth > paper.width - settings.margin) {
-                        currentX = settings.margin;
-                        currentY += displayHeight + settings.gap;
-                    }
-
-                    // 現在のページに入るかチェック
-                    if (currentY + displayHeight > paper.height - settings.margin) {
-                        pages.push(currentPage);
-                        currentPage = { items: [] };
-                        currentX = settings.margin;
-                        currentY = settings.margin;
-                    }
-
-                    currentPage.items.push({
-                        ...img,
-                        x: currentX,
-                        y: currentY,
-                        renderWidth: displayWidth,
-                        renderHeight: displayHeight
-                    });
-
-                    currentX += displayWidth + settings.gap;
-                });
-
-                if (currentPage.items.length > 0) {
-                    pages.push(currentPage);
-                }
-
-                setLayoutPages(pages);
-
-            }, [images, settings]); // settings変更時（orientation含む）に再計算
-
-            // --- プレビューのレスポンシブスケール計算 ---
-            useEffect(() => {
-                const updateScale = () => {
-                    const container = previewContainerRef.current;
-                    if (!container) return;
-                    
-                    const paper = PAPER_SIZES[settings.paperSize];
-                    // コンテナのパディング分
-                    const paddingX = 64;
-                    const paddingY = 64;
-                    
-                    const availableWidth = container.clientWidth - paddingX;
-                    const availableHeight = container.clientHeight - paddingY;
-
-                    if (availableWidth <= 0 || availableHeight <= 0) return;
-
-                    const scaleW = availableWidth / paper.width;
-                    const scaleH = availableHeight / paper.height;
-                    
-                    let newScale = Math.min(scaleW, scaleH);
-                    setPreviewScale(newScale);
-                };
-
-                const observer = new ResizeObserver(updateScale);
-                if (previewContainerRef.current) {
-                    observer.observe(previewContainerRef.current);
-                }
-                updateScale();
-                return () => observer.disconnect();
-            }, [settings.paperSize]);
-
-            // --- 単位変換ヘルパー ---
-            const toDisplay = (mmVal) => {
-                if (displayUnit === 'cm') {
-                    return Math.round((mmVal / 10) * 100) / 100;
-                }
-                return mmVal;
-            };
-
-            const fromDisplay = (dispVal) => {
-                if (displayUnit === 'cm') {
-                    return dispVal * 10;
-                }
-                return dispVal;
-            };
-
-            const handleSettingChange = (key, rawVal) => {
-                const numVal = parseFloat(rawVal);
-                if (isNaN(numVal)) return;
-                
-                setSettings(prev => ({
-                    ...prev,
-                    [key]: fromDisplay(numVal)
-                }));
-            };
-
-            // --- PDF生成 ---
-            const generatePDF = () => {
-                if (layoutPages.length === 0) return;
-
-                const paper = PAPER_SIZES[settings.paperSize];
-                const doc = new jsPDF({
-                    orientation: 'portrait',
-                    unit: 'mm',
-                    format: [paper.width, paper.height]
-                });
-
-                layoutPages.forEach((page, pageIndex) => {
-                    if (pageIndex > 0) {
-                        doc.addPage();
-                    }
-
-                    page.items.forEach(item => {
-                        try {
-                            doc.addImage(item.src, 'JPEG', item.x, item.y, item.renderWidth, item.renderHeight);
-                        } catch (err) {
-                            console.error("Image add error", err);
-                        }
-                    });
-                });
-
-                doc.save(`layout_${settings.paperSize}_${new Date().toISOString().slice(0,10)}.pdf`);
+                const precision = step.toString().split('.')[1]?.length || 0;
+                onChange(Number(newVal.toFixed(precision)));
             };
 
             return (
-                <div className="flex flex-col h-screen overflow-hidden">
-                    {/* Header */}
-                    <header className="bg-white border-b px-6 py-4 flex items-center justify-between shadow-sm z-10 flex-shrink-0">
-                        <div className="flex items-center gap-2">
-                            <FileIcon className="text-blue-600" />
-                            <h1 className="text-xl font-bold text-gray-800 hidden sm:block">インサート配置PDFメーカー</h1>
-                            <h1 className="text-lg font-bold text-gray-800 sm:hidden">PDFメーカー</h1>
+                <div className="flex items-center w-full border border-gray-300 rounded focus-within:ring-2 focus-within:ring-blue-500 overflow-hidden bg-white shadow-sm">
+                    {/* マイナスボタン */}
+                    <button 
+                        type="button" 
+                        onClick={handleDecrement} 
+                        className="w-10 h-10 flex items-center justify-center bg-gray-50 text-gray-500 hover:bg-gray-200 hover:text-gray-700 active:bg-gray-300 border-r border-gray-300 transition-colors focus:outline-none"
+                        tabIndex="-1"
+                    >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                    </button>
+                    
+                    {/* 数値入力 */}
+                    <input 
+                        ref={inputRef}
+                        type="number" 
+                        step={step} 
+                        min={min}
+                        value={value} 
+                        onChange={(e) => onChange(e.target.value)}
+                        className="w-full h-10 text-center text-gray-700 font-medium focus:outline-none"
+                    />
+                    
+                    {/* プラスボタン */}
+                    <button 
+                        type="button" 
+                        onClick={handleIncrement} 
+                        className="w-10 h-10 flex items-center justify-center bg-gray-50 text-gray-500 hover:bg-gray-200 hover:text-gray-700 active:bg-gray-300 border-l border-gray-300 transition-colors focus:outline-none"
+                        tabIndex="-1"
+                    >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                    </button>
+                    
+                    {/* 単位ラベル（ある場合のみ表示） */}
+                    {unitLabel && (
+                        <div className="bg-gray-100 border-l border-gray-300 px-2 h-10 flex items-center justify-center text-xs text-gray-500 w-10 flex-shrink-0 font-medium select-none">
+                            {unitLabel}
                         </div>
-                        <div className="flex gap-3">
-                            <button 
-                                onClick={clearAllImages}
-                                disabled={images.length === 0}
-                                className="px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded transition disabled:opacity-50 whitespace-nowrap"
-                            >
-                                全削除
-                            </button>
-                            <button 
-                                onClick={generatePDF}
-                                disabled={images.length === 0}
-                                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded font-medium hover:bg-blue-700 transition shadow disabled:opacity-50 disabled:cursor-not-allowed text-sm whitespace-nowrap"
-                            >
-                                <DownloadIcon size={16} />
-                                <span className="hidden sm:inline">PDFをダウンロード</span>
-                                <span className="sm:hidden">保存</span>
-                            </button>
-                        </div>
-                    </header>
+                    )}
+                </div>
+            );
+        };
 
-                    <div className="flex flex-1 overflow-hidden">
-                        {/* Sidebar */}
-                        <aside className="w-80 bg-white border-r flex flex-col z-10 shadow-[4px_0_24px_rgba(0,0,0,0.02)] flex-shrink-0 overflow-y-auto custom-scrollbar">
-                            <div className="p-5 space-y-6">
-                                
-                                {/* Upload Section */}
+
+        const App = () => {
+            // A4 size in mm
+            const A4_WIDTH_MM = 210;
+            const A4_HEIGHT_MM = 297;
+            const PX_TO_MM_SCALE = 3.7795275591; // 1mm = 3.78px approx (at 96 DPI)
+
+            const [images, setImages] = useState([]);
+            const [isDragging, setIsDragging] = useState(false);
+            const [isGenerating, setIsGenerating] = useState(false);
+            
+            // Settings
+            const [settings, setSettings] = useState({
+                targetHeight: 50, // mm (default 5cm)
+                margin: 10,       // mm
+                gap: 5,           // mm
+                showGuides: true,
+                paperSize: 'a4', // 'a4' only for now
+                unit: 'cm'       // 'mm' or 'cm' for display
+            });
+
+            // Conversion helpers
+            const toMm = (val, unit) => unit === 'cm' ? val * 10 : val;
+            const toDisplay = (valMm) => settings.unit === 'cm' ? parseFloat((valMm / 10).toFixed(2)) : Math.round(valMm);
+            const fromDisplay = (val) => settings.unit === 'cm' ? val * 10 : val;
+
+            const handleSettingChange = (key, displayValue) => {
+                const numVal = parseFloat(displayValue);
+                if (isNaN(numVal)) return;
+
+                // Convert display value back to mm for internal storage
+                const mmVal = fromDisplay(numVal);
+                setSettings(prev => ({ ...prev, [key]: mmVal }));
+            };
+
+            const toggleUnit = () => {
+                setSettings(prev => ({ ...prev, unit: prev.unit === 'mm' ? 'cm' : 'mm' }));
+            };
+
+            const handleFiles = (files) => {
+                const newImages = Array.from(files)
+                    .filter(file => file.type.startsWith('image/'))
+                    .map(file => ({
+                        file,
+                        id: Math.random().toString(36).substr(2, 9),
+                        preview: URL.createObjectURL(file),
+                        name: file.name
+                    }));
+                
+                setImages(prev => [...prev, ...newImages]);
+            };
+
+            const onDragOver = (e) => {
+                e.preventDefault();
+                setIsDragging(true);
+            };
+
+            const onDragLeave = (e) => {
+                e.preventDefault();
+                setIsDragging(false);
+            };
+
+            const onDrop = (e) => {
+                e.preventDefault();
+                setIsDragging(false);
+                handleFiles(e.dataTransfer.files);
+            };
+
+            const removeImage = (id) => {
+                setImages(prev => {
+                    const target = prev.find(img => img.id === id);
+                    if (target) URL.revokeObjectURL(target.preview); // Cleanup
+                    return prev.filter(img => img.id !== id);
+                });
+            };
+
+            // Layout Calculation
+            const layout = useMemo(() => {
+                const pageW = A4_WIDTH_MM;
+                const pageH = A4_HEIGHT_MM;
+                const margin = settings.margin;
+                const gap = settings.gap;
+                const targetH = settings.targetHeight;
+
+                const contentW = pageW - (margin * 2);
+                const contentH = pageH - (margin * 2);
+
+                let currentPage = [];
+                const pages = [currentPage];
+                
+                let currentX = margin;
+                let currentY = margin;
+                let currentRowHeight = 0;
+
+                images.forEach((img) => {
+                    // Load image dimensions (using natural aspect ratio)
+                    // Since we can't synchronously get image dimensions from File object without loading,
+                    // We'll estimate or use a placeholder aspect ratio if not loaded yet.
+                    // For precise PDF, we need to load them. 
+                    // In this UI, let's assume images are roughly standard. 
+                    // *Wait*, for PDF generation we need real aspect ratios.
+                    // For the preview UI, we might simply display them in a flex grid.
+                    // BUT, to show "pages", we need to know how many fit.
+                    
+                    // Simple logic: We assume a fixed height, so width varies by aspect ratio.
+                    // To make this robust without async loading complexity in this simple file:
+                    // We will just render the images in the preview area using CSS flex/wrap logic 
+                    // that mimics the print layout, but simplified.
+                    // The PDF generation function will handle the strict layout.
+                    
+                    // For the PREVIEW list below:
+                    // We just return the list. The actual visual pagination in HTML 
+                    // is hard without pre-calculating every image size.
+                    // So we will show a "Continuous Scroll" preview, but mark page breaks if possible?
+                    // Let's stick to a continuous list for the UI preview, and trust the PDF generator.
+                });
+
+                return { pages }; 
+            }, [images, settings]);
+
+
+            const generatePDF = async () => {
+                if (images.length === 0) return;
+                setIsGenerating(true);
+
+                try {
+                    // Create PDF
+                    const { jsPDF } = window.jspdf;
+                    const doc = new jsPDF({
+                        orientation: 'p',
+                        unit: 'mm',
+                        format: 'a4'
+                    });
+
+                    const margin = settings.margin;
+                    const gap = settings.gap;
+                    const targetH = settings.targetHeight;
+                    const pageW = A4_WIDTH_MM;
+                    const pageH = A4_HEIGHT_MM;
+                    const cursorStartX = margin;
+                    const cursorStartY = margin;
+                    const maxRowW = pageW - margin;
+
+                    let cursorX = cursorStartX;
+                    let cursorY = cursorStartY;
+                    let currentRowMaxH = 0; // Track max height in current row (though we force height, helpful if we change logic)
+
+                    // Helper to load image to get dimensions
+                    const loadImage = (src) => new Promise((resolve) => {
+                        const img = new Image();
+                        img.onload = () => resolve(img);
+                        img.src = src;
+                    });
+
+                    for (let i = 0; i < images.length; i++) {
+                        const imgData = images[i];
+                        const imgObj = await loadImage(imgData.preview);
+                        
+                        // Calculate dimensions
+                        const aspectRatio = imgObj.width / imgObj.height;
+                        const printH = targetH;
+                        const printW = targetH * aspectRatio;
+
+                        // Check if it fits on current row
+                        if (cursorX + printW > maxRowW) {
+                            // New Row
+                            cursorX = cursorStartX;
+                            cursorY += targetH + gap;
+                            
+                            // Check if new row fits on page
+                            if (cursorY + targetH > pageH - margin) {
+                                // New Page
+                                doc.addPage();
+                                cursorX = cursorStartX;
+                                cursorY = cursorStartY;
+                            }
+                        }
+
+                        // Add image
+                        // To support different file types properly, convert canvas if needed, 
+                        // but jsPDF supports basic types.
+                        // Safe approach: Draw to canvas, get JPEG/PNG data
+                        const canvas = document.createElement('canvas');
+                        canvas.width = imgObj.width;
+                        canvas.height = imgObj.height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(imgObj, 0, 0);
+                        const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+
+                        doc.addImage(dataUrl, 'JPEG', cursorX, cursorY, printW, printH);
+
+                        cursorX += printW + gap;
+                    }
+
+                    doc.save("photos_layout.pdf");
+
+                } catch (e) {
+                    console.error(e);
+                    alert("PDF作成中にエラーが発生しました。");
+                } finally {
+                    setIsGenerating(false);
+                }
+            };
+
+            const displayUnit = settings.unit;
+            
+            // Preview scaling
+            const previewScale = 1; // 1px = 1mm (roughly on screen?) No, screen is usually 96dpi.
+            // 1mm = 3.78px. Let's make the preview roughly accurate to physical size on screen if possible,
+            // or just fit-to-width.
+            // Let's use a scale factor for the preview container.
+            
+            return (
+                <div className="min-h-screen flex flex-col md:flex-row max-w-7xl mx-auto p-4 gap-6">
+                    
+                    {/* Left Sidebar: Controls */}
+                    <div className="w-full md:w-80 flex flex-col gap-6 bg-white p-6 rounded-xl shadow-sm border border-gray-200 h-fit sticky top-4">
+                        <header>
+                            <h1 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                                <FileIcon />
+                                インサートPDFメーカー
+                            </h1>
+                            <p className="text-sm text-gray-500 mt-1">写真を並べてPDFにします</p>
+                        </header>
+
+                        {/* Settings */}
+                        <div className="space-y-4 border-t pt-4 border-gray-100">
+                            <div className="flex justify-between items-center mb-2">
+                                <h2 className="text-sm font-bold text-gray-700">レイアウト設定</h2>
+                                <button 
+                                    onClick={toggleUnit}
+                                    className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded text-gray-600 font-medium transition"
+                                >
+                                    単位: {settings.unit}
+                                </button>
+                            </div>
+                            
+                            {/* 画像の高さ (NumberStepper使用) */}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-600 mb-1">画像の高さ</label>
+                                <NumberStepper 
+                                    value={toDisplay(settings.targetHeight)}
+                                    onChange={(val) => handleSettingChange('targetHeight', val)}
+                                    step={displayUnit === 'cm' ? "0.1" : "1"}
+                                    min={1}
+                                    unitLabel={displayUnit}
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                {/* 余白 (NumberStepper使用) */}
                                 <div>
-                                    <label className="block mb-2 font-bold text-gray-700">画像の追加</label>
-                                    <div className="relative group">
-                                        <input 
-                                            type="file" 
-                                            multiple 
-                                            accept="image/*"
-                                            onChange={handleFileUpload}
-                                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                                        />
-                                        <div className="border-2 border-dashed border-blue-200 bg-blue-50 rounded-lg p-6 flex flex-col items-center justify-center text-blue-600 group-hover:bg-blue-100 group-hover:border-blue-300 transition">
-                                            {isProcessing ? (
-                                                <div className="flex flex-col items-center">
-                                                    <LoaderIcon className="mb-2 text-blue-500" />
-                                                    <span className="text-sm">処理中...</span>
-                                                </div>
-                                            ) : (
-                                                <>
-                                                    <UploadIcon className="mb-2" />
-                                                    <span className="text-sm font-medium">クリックして選択</span>
-                                                </>
-                                            )}
-                                        </div>
-                                    </div>
-                                    <p className="text-xs text-gray-500 mt-2">※ 設定した向きに合わせて自動回転します</p>
+                                    <label className="block text-sm font-medium text-gray-600 mb-1">余白</label>
+                                    <NumberStepper 
+                                        value={toDisplay(settings.margin)}
+                                        onChange={(val) => handleSettingChange('margin', val)}
+                                        step={displayUnit === 'cm' ? "0.1" : "1"}
+                                        min={0}
+                                        unitLabel={displayUnit}
+                                    />
                                 </div>
-
-                                <hr className="border-gray-100" />
-
-                                {/* Settings Section */}
-                                <div className="space-y-4">
-                                    <div className="flex items-center justify-between">
-                                        <h2 className="font-bold text-gray-700">設定</h2>
-                                        
-                                        {/* Unit Toggle */}
-                                        <div className="bg-gray-100 p-1 rounded-lg flex text-xs font-medium">
-                                            <button 
-                                                onClick={() => setDisplayUnit('mm')}
-                                                className={`px-3 py-1 rounded ${displayUnit === 'mm' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
-                                            >
-                                                mm
-                                            </button>
-                                            <button 
-                                                onClick={() => setDisplayUnit('cm')}
-                                                className={`px-3 py-1 rounded ${displayUnit === 'cm' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
-                                            >
-                                                cm
-                                            </button>
-                                        </div>
-                                    </div>
-                                    
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-600 mb-1">用紙サイズ</label>
-                                        <select 
-                                            value={settings.paperSize}
-                                            onChange={(e) => setSettings({...settings, paperSize: e.target.value})}
-                                            className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                                        >
-                                            {Object.keys(PAPER_SIZES).map(size => (
-                                                <option key={size} value={size}>{size}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-
-                                    {/* Orientation Settings */}
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-600 mb-1">画像の向き</label>
-                                        <div className="grid grid-cols-2 gap-2">
-                                            <button
-                                                onClick={() => handleOrientationChange('portrait')}
-                                                className={`px-3 py-2 text-sm rounded border flex items-center justify-center gap-2 transition ${
-                                                    settings.orientation === 'portrait' 
-                                                    ? 'bg-blue-50 border-blue-500 text-blue-700 font-medium' 
-                                                    : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
-                                                }`}
-                                            >
-                                                <div className="w-3 h-4 border border-current rounded-sm"></div>
-                                                縦 (Portrait)
-                                            </button>
-                                            <button
-                                                onClick={() => handleOrientationChange('landscape')}
-                                                className={`px-3 py-2 text-sm rounded border flex items-center justify-center gap-2 transition ${
-                                                    settings.orientation === 'landscape' 
-                                                    ? 'bg-blue-50 border-blue-500 text-blue-700 font-medium' 
-                                                    : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
-                                                }`}
-                                            >
-                                                <div className="w-4 h-3 border border-current rounded-sm"></div>
-                                                横 (Landscape)
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-600 mb-1">画像の高さ ({displayUnit})</label>
-                                        <div className="flex items-center">
-                                            <input 
-                                                type="number"
-                                                step={displayUnit === 'cm' ? "0.1" : "1"}
-                                                value={toDisplay(settings.targetHeight)}
-                                                onChange={(e) => handleSettingChange('targetHeight', e.target.value)}
-                                                className="w-full border border-gray-300 rounded-l px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                                            />
-                                            <span className="bg-gray-100 border border-l-0 border-gray-300 rounded-r px-3 py-2 text-sm text-gray-500 w-12 text-center">{displayUnit}</span>
-                                        </div>
-                                    </div>
-
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div>
-                                            <label className="block text-xs font-medium text-gray-500 mb-1">余白 ({displayUnit})</label>
-                                            <input 
-                                                type="number"
-                                                step={displayUnit === 'cm' ? "0.1" : "1"}
-                                                value={toDisplay(settings.margin)}
-                                                onChange={(e) => handleSettingChange('margin', e.target.value)}
-                                                className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-medium text-gray-500 mb-1">間隔 ({displayUnit})</label>
-                                            <input 
-                                                type="number"
-                                                step={displayUnit === 'cm' ? "0.1" : "1"}
-                                                value={toDisplay(settings.gap)}
-                                                onChange={(e) => handleSettingChange('gap', e.target.value)}
-                                                className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <hr className="border-gray-100" />
-                                
-                                <div className="text-sm text-gray-600 flex justify-between">
-                                    <span>登録画像数:</span>
-                                    <span className="font-bold">{images.length}枚</span>
+                                {/* 間隔 (NumberStepper使用) */}
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-600 mb-1">間隔</label>
+                                    <NumberStepper 
+                                        value={toDisplay(settings.gap)}
+                                        onChange={(val) => handleSettingChange('gap', val)}
+                                        step={displayUnit === 'cm' ? "0.1" : "1"}
+                                        min={0}
+                                        unitLabel={displayUnit}
+                                    />
                                 </div>
                             </div>
-                        </aside>
 
-                        {/* Main Preview Area */}
-                        <main 
-                            ref={previewContainerRef}
-                            className="flex-1 bg-gray-100 overflow-auto p-8 flex flex-col items-center gap-8 preview-scroll relative"
-                        >
-                            {images.length === 0 && (
-                                <div className="absolute inset-0 flex items-center justify-center text-gray-400 pointer-events-none">
-                                    <div className="text-center">
-                                        <FileIcon className="mx-auto h-12 w-12 opacity-20 mb-3" />
-                                        <p>画像を追加するとプレビューが表示されます</p>
-                                    </div>
+                            <div className="pt-2">
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input 
+                                        type="checkbox" 
+                                        checked={settings.showGuides} 
+                                        onChange={(e) => setSettings(p => ({...p, showGuides: e.target.checked}))}
+                                        className="rounded text-blue-600 focus:ring-blue-500"
+                                    />
+                                    <span className="text-sm text-gray-600">プレビューに枠線を表示</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="space-y-3 pt-2">
+                            <label className={`
+                                flex items-center justify-center w-full p-3 rounded-lg border-2 border-dashed cursor-pointer transition-colors
+                                ${isDragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50'}
+                            `}
+                            onDragOver={onDragOver}
+                            onDragLeave={onDragLeave}
+                            onDrop={onDrop}
+                            >
+                                <input type="file" multiple accept="image/*" className="hidden" onChange={(e) => handleFiles(e.target.files)} />
+                                <div className="text-center">
+                                    <span className="text-sm font-medium text-gray-600 block">写真を追加</span>
+                                    <span className="text-xs text-gray-400">クリック または ドラッグ</span>
                                 </div>
-                            )}
+                            </label>
 
-                            {layoutPages.map((page, pageIndex) => {
-                                const paper = PAPER_SIZES[settings.paperSize];
-                                return (
-                                    <div 
-                                        key={pageIndex}
-                                        className="bg-white paper-shadow relative transition-all duration-200 origin-center"
-                                        style={{
-                                            // プレビューのスケールを適用
-                                            width: `${paper.width * previewScale}px`,
-                                            height: `${paper.height * previewScale}px`,
-                                            // スケールしてもレイアウトが崩れないように、minサイズも固定
-                                            minWidth: `${paper.width * previewScale}px`,
-                                            minHeight: `${paper.height * previewScale}px`,
-                                        }}
-                                    >
-                                        {/* Page Number */}
-                                        <div className="absolute -top-6 left-0 text-xs text-gray-400 font-bold whitespace-nowrap">
-                                            Page {pageIndex + 1}
+                            <button 
+                                onClick={generatePDF}
+                                disabled={images.length === 0 || isGenerating}
+                                className={`
+                                    w-full py-3 px-4 rounded-lg font-bold text-white flex items-center justify-center shadow-md transition-all
+                                    ${images.length === 0 
+                                        ? 'bg-gray-300 cursor-not-allowed' 
+                                        : 'bg-blue-600 hover:bg-blue-700 active:scale-[0.98]'}
+                                `}
+                            >
+                                {isGenerating ? <LoaderIcon /> : <DownloadIcon />}
+                                {isGenerating ? '生成中...' : 'PDFを作成'}
+                            </button>
+                        </div>
+
+                        {/* File List */}
+                        <div className="flex-1 overflow-y-auto min-h-[150px] border-t pt-4">
+                             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">選択中の画像 ({images.length})</h3>
+                             <div className="space-y-2">
+                                {images.map((img) => (
+                                    <div key={img.id} className="flex items-center gap-3 bg-gray-50 p-2 rounded border border-gray-100 group">
+                                        <img src={img.preview} alt="" className="w-10 h-10 object-cover rounded bg-white" />
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-xs text-gray-700 truncate font-medium">{img.name}</p>
                                         </div>
-                                        
-                                        {/* Render Images */}
-                                        {page.items.map((item) => (
-                                            <div
-                                                key={item.id}
-                                                className="absolute group bg-gray-50 border border-gray-100"
+                                        <button 
+                                            onClick={() => removeImage(img.id)}
+                                            className="text-gray-400 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                        >
+                                            <TrashIcon />
+                                        </button>
+                                    </div>
+                                ))}
+                                {images.length === 0 && (
+                                    <p className="text-xs text-gray-400 text-center py-4">まだ画像がありません</p>
+                                )}
+                             </div>
+                        </div>
+                    </div>
+
+                    {/* Right Area: Preview */}
+                    <div className="flex-1 bg-gray-200 rounded-xl overflow-hidden shadow-inner flex flex-col h-[calc(100vh-2rem)]">
+                        <div className="bg-white border-b px-4 py-2 flex justify-between items-center text-xs text-gray-500">
+                            <span>プレビュー (簡易表示)</span>
+                            <span>A4 / {settings.unit === 'cm' ? 'cm' : 'mm'}</span>
+                        </div>
+                        <main className="flex-1 overflow-auto p-8 flex justify-center preview-scroll bg-gray-300/50">
+                            {/* A4 Paper */}
+                            {/* CSS for A4 aspect ratio: 210mm x 297mm = 1 : 1.414 */}
+                            {/* Let's fix width to something readable, say 600px, and calc height */}
+                            {/* Note: This is a VISUAL PREVIEW. It won't perfectly match PDF pagination until we implement complex logic. */}
+                            {/* Currently, we just flow images to show sizes. */}
+                            <div 
+                                className="bg-white shadow-xl relative transition-all duration-300"
+                                style={{
+                                    width: '210mm',
+                                    minHeight: '297mm', // Allow it to grow for the "Continuous" look or fixed page
+                                    // Scale it down to fit screen if needed, but horizontal scroll is okay for detailed work
+                                    padding: `${settings.margin}mm`,
+                                    boxSizing: 'border-box'
+                                }}
+                            >
+                                <div className="flex flex-wrap content-start" style={{ gap: `${settings.gap}mm` }}>
+                                    {images.map((img) => (
+                                        <div 
+                                            key={img.id}
+                                            className="relative group transition-all duration-300"
+                                            style={{
+                                                height: `${settings.targetHeight}mm`,
+                                                // width is auto based on image aspect ratio
+                                                // HTML img behaves well here
+                                            }}
+                                        >
+                                            <img 
+                                                src={img.preview} 
+                                                className="h-full w-auto object-contain bg-gray-100"
                                                 style={{
-                                                    left: `${item.x * previewScale}px`,
-                                                    top: `${item.y * previewScale}px`,
-                                                    width: `${item.renderWidth * previewScale}px`,
-                                                    height: `${item.renderHeight * previewScale}px`,
-                                                    backgroundImage: `url(${item.src})`,
-                                                    backgroundSize: 'contain',
-                                                    backgroundRepeat: 'no-repeat',
-                                                    backgroundPosition: 'center'
+                                                    outline: settings.showGuides ? '1px dashed #cbd5e1' : 'none'
                                                 }}
-                                            >
-                                                {/* Hover Delete Button */}
-                                                <button
-                                                    onClick={() => removeImage(item.id)}
-                                                    className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 z-10 scale-75"
+                                            />
+                                            <div className="absolute top-0 right-0 p-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button 
+                                                    onClick={() => removeImage(img.id)}
+                                                    className="bg-red-500 text-white rounded-full p-1 shadow hover:bg-red-600 transform hover:scale-110 z-10 scale-75"
                                                     title="削除"
                                                 >
                                                     <TrashIcon />
                                                 </button>
                                             </div>
-                                        ))}
+                                        </div>
+                                    ))}
 
-                                        {/* Margins Guide (Optional visual aid) */}
-                                        <div 
-                                            className="absolute border border-blue-200 pointer-events-none opacity-30"
-                                            style={{
-                                                left: `${settings.margin * previewScale}px`,
-                                                top: `${settings.margin * previewScale}px`,
-                                                right: `${settings.margin * previewScale}px`,
-                                                bottom: `${settings.margin * previewScale}px`,
-                                            }}
-                                        />
-                                    </div>
-                                );
-                            })}
+                                    {/* Margins Guide (Optional visual aid) */}
+                                    <div 
+                                        className="absolute border border-blue-200 pointer-events-none opacity-30"
+                                        style={{
+                                            left: `${settings.margin * previewScale}px`,
+                                            top: `${settings.margin * previewScale}px`,
+                                            right: `${settings.margin * previewScale}px`,
+                                            bottom: `${settings.margin * previewScale}px`,
+                                        }}
+                                    />
+                                </div>
+                            </div>
                         </main>
                     </div>
                 </div>
