@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>インサート配置＆PDF生成ツール</title>
+    <title>Inserts paper generator</title>
     
     <!-- React & ReactDOM -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -22,7 +22,6 @@
         body {
             background-color: #f3f4f6;
             font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif;
-            /* Prevent pull-to-refresh on mobile if needed, but usually default is fine */
         }
         .preview-scroll::-webkit-scrollbar {
             width: 8px;
@@ -69,12 +68,22 @@
             'postcard': { name: 'ハガキ', width: 100, height: 148 }
         };
 
-        // 1mm ≒ 3.78px (96dpi) - used for preview scaling logic only
         const MM_TO_PX = 3.7795;
 
+        const DEFAULT_SETTINGS = {
+            paperSize: 'a4',
+            targetHeight: 90, // mm (9cm)
+            targetWidth: 25,  // mm (2.5cm)
+            margin: 3,        // mm (0.3cm)
+            gap: 2,           // mm (0.2cm)
+            showGuides: true,
+            unit: 'cm',
+            ignoreAspectRatio: false
+        };
+
         // --- Icons ---
-        const TrashIcon = () => (
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        const TrashIcon = ({ className = "w-4 h-4" }) => (
+            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
             </svg>
         );
@@ -104,33 +113,93 @@
             </svg>
         );
 
+        const RefreshIcon = ({ className = "w-4 h-4" }) => (
+            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+            </svg>
+        );
+
         // --- Components ---
 
-        const NumberStepper = ({ value, onChange, step, min = 0, unitLabel }) => {
+        const NumberStepper = ({ value, onChange, step, min = 0, unitLabel, disabled = false, defaultValue }) => {
+            const [localValue, setLocalValue] = useState(value);
+            const [isFocused, setIsFocused] = useState(false);
+
+            // フォーカス外の時のみ親の変更をローカルに同期
+            useEffect(() => {
+                if (!isFocused && parseFloat(localValue) !== value) {
+                    setLocalValue(value);
+                }
+            }, [value, isFocused]);
+
+            const handleChange = (e) => {
+                const val = e.target.value;
+                setLocalValue(val);
+                
+                // 空白や無効な文字列の場合はデフォルト値を親に送信しつつ、入力欄は空を維持
+                if (val === '' || isNaN(parseFloat(val))) {
+                    onChange(defaultValue);
+                } else {
+                    onChange(parseFloat(val));
+                }
+            };
+
+            const handleBlur = () => {
+                setIsFocused(false);
+                if (localValue === '' || isNaN(parseFloat(localValue))) {
+                    setLocalValue(defaultValue);
+                    onChange(defaultValue);
+                } else {
+                    const num = Math.max(min, parseFloat(localValue));
+                    setLocalValue(num);
+                    onChange(num);
+                }
+            };
+
+            const handleFocus = () => {
+                setIsFocused(true);
+            };
+
             const handleDecrement = () => {
-                const current = parseFloat(value) || 0;
+                if(disabled) return;
+                const current = (localValue === '' || isNaN(parseFloat(localValue))) ? defaultValue : parseFloat(localValue);
                 const stepNum = parseFloat(step) || 1;
                 let newVal = current - stepNum;
                 if (newVal < min) newVal = min;
                 const precision = step.toString().split('.')[1]?.length || 0;
-                onChange(Number(newVal.toFixed(precision)));
+                const finalVal = Number(newVal.toFixed(precision));
+                setLocalValue(finalVal);
+                onChange(finalVal);
             };
 
             const handleIncrement = () => {
-                const current = parseFloat(value) || 0;
+                if(disabled) return;
+                const current = (localValue === '' || isNaN(parseFloat(localValue))) ? defaultValue : parseFloat(localValue);
                 const stepNum = parseFloat(step) || 1;
                 const newVal = current + stepNum;
                 const precision = step.toString().split('.')[1]?.length || 0;
-                onChange(Number(newVal.toFixed(precision)));
+                const finalVal = Number(newVal.toFixed(precision));
+                setLocalValue(finalVal);
+                onChange(finalVal);
             };
 
             return (
-                <div className="flex items-center w-full border border-gray-300 rounded focus-within:ring-2 focus-within:ring-blue-500 overflow-hidden bg-white shadow-sm">
-                    <button type="button" onClick={handleDecrement} className="w-10 h-10 flex items-center justify-center bg-gray-50 text-gray-500 hover:bg-gray-200 border-r border-gray-300 transition-colors focus:outline-none">
+                <div className={`flex items-center w-full border rounded overflow-hidden shadow-sm transition-colors ${disabled ? 'bg-gray-100 border-gray-200 opacity-60' : 'bg-white border-gray-300 focus-within:ring-2 focus-within:ring-blue-500'}`}>
+                    <button type="button" onClick={handleDecrement} disabled={disabled} className="w-10 h-10 flex items-center justify-center bg-gray-50 text-gray-500 hover:bg-gray-200 border-r border-gray-300 transition-colors focus:outline-none disabled:cursor-not-allowed">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                     </button>
-                    <input type="number" step={step} min={min} value={value} onChange={(e) => onChange(e.target.value)} className="w-full h-10 text-center text-gray-700 font-medium focus:outline-none" />
-                    <button type="button" onClick={handleIncrement} className="w-10 h-10 flex items-center justify-center bg-gray-50 text-gray-500 hover:bg-gray-200 border-l border-gray-300 transition-colors focus:outline-none">
+                    <input 
+                        type="number" 
+                        step={step} 
+                        min={min} 
+                        value={localValue} 
+                        onChange={handleChange} 
+                        onBlur={handleBlur}
+                        onFocus={handleFocus}
+                        disabled={disabled}
+                        className="w-full h-10 text-center text-gray-700 font-medium focus:outline-none bg-transparent disabled:cursor-not-allowed" 
+                    />
+                    <button type="button" onClick={handleIncrement} disabled={disabled} className="w-10 h-10 flex items-center justify-center bg-gray-50 text-gray-500 hover:bg-gray-200 border-l border-gray-300 transition-colors focus:outline-none disabled:cursor-not-allowed">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                     </button>
                     {unitLabel && <div className="bg-gray-100 border-l border-gray-300 px-2 h-10 flex items-center justify-center text-xs text-gray-500 w-10 flex-shrink-0 font-medium select-none">{unitLabel}</div>}
@@ -143,16 +212,8 @@
             const [isDragging, setIsDragging] = useState(false);
             const [isGenerating, setIsGenerating] = useState(false);
             
-            const [settings, setSettings] = useState({
-                paperSize: 'a4',
-                targetHeight: 50,
-                margin: 15,
-                gap: 5,
-                showGuides: true,
-                unit: 'cm'
-            });
+            const [settings, setSettings] = useState(DEFAULT_SETTINGS);
 
-            // For mobile scaling
             const [previewScale, setPreviewScale] = useState(1);
             const previewContainerRef = useRef(null);
 
@@ -171,35 +232,43 @@
                 setSettings(prev => ({ ...prev, unit: prev.unit === 'mm' ? 'cm' : 'mm' }));
             };
 
+            const resetSettings = () => {
+                if(confirm('レイアウト設定を初期値に戻しますか？')) {
+                    setSettings(prev => ({
+                        ...DEFAULT_SETTINGS,
+                        unit: prev.unit // 単位は維持する
+                    }));
+                }
+            };
+
+            const clearImages = () => {
+                if(confirm('すべての画像を消去しますか？')) {
+                    images.forEach(img => {
+                        if (img.preview.startsWith('blob:')) URL.revokeObjectURL(img.preview);
+                    });
+                    setImages([]);
+                }
+            };
+
             // Responsive Scaling Logic
             useEffect(() => {
                 const calculateScale = () => {
                     if (!previewContainerRef.current) return;
-                    
                     const containerWidth = previewContainerRef.current.clientWidth;
-                    // Padding (p-8 in PC, p-4 in mobile)
                     const padding = window.innerWidth < 768 ? 32 : 64; 
                     const availableWidth = containerWidth - padding;
-                    
                     const paperWidthPx = currentPaper.width * MM_TO_PX;
                     
-                    // Scale to fit width if paper is wider than container
                     let newScale = availableWidth / paperWidthPx;
-                    
-                    // Don't scale up too much on huge screens, but keep it readable
-                    // Allow shrinking for mobile
                     if (newScale > 1) newScale = 1; 
                     
                     setPreviewScale(newScale);
                 };
 
-                // Initial calc
                 calculateScale();
-
-                // Add resize listener
                 window.addEventListener('resize', calculateScale);
                 return () => window.removeEventListener('resize', calculateScale);
-            }, [currentPaper, settings.paperSize]); // Re-calc when paper size changes
+            }, [currentPaper, settings.paperSize]); 
 
             // CanvasHelper: Rotate Image
             const createRotatedImage = (imgSource, angle = 90) => {
@@ -299,6 +368,7 @@
                 const margin = settings.margin;
                 const gap = settings.gap;
                 const targetH = settings.targetHeight;
+                const targetW = settings.targetWidth;
 
                 const contentW = pageW - (margin * 2);
                 const contentH = pageH - (margin * 2);
@@ -319,7 +389,8 @@
 
                 images.forEach((img) => {
                     const printH = targetH;
-                    const printW = targetH * img.aspectRatio;
+                    // アスペクト比無視設定に応じて横幅の計算を切り替え
+                    const printW = settings.ignoreAspectRatio ? targetW : (targetH * img.aspectRatio);
 
                     if (currentX + printW > contentW && currentX > 0) {
                         currentX = 0;
@@ -409,23 +480,27 @@
             return (
                 <div className="min-h-screen flex flex-col md:flex-row max-w-7xl mx-auto p-2 md:p-4 gap-4 md:gap-6">
                     
-                    {/* Controls (Sidebar on Desktop, Top on Mobile) */}
-                    <div className="w-full md:w-80 flex flex-col gap-4 md:gap-6 bg-white p-4 md:p-6 rounded-xl shadow-sm border border-gray-200 h-fit md:sticky md:top-4 z-20">
+                    {/* Controls */}
+                    <div className="w-full md:w-[360px] flex flex-col gap-4 md:gap-6 bg-white p-4 md:p-5 rounded-xl shadow-sm border border-gray-200 h-fit md:sticky md:top-4 z-20">
                         <header>
                             <h1 className="text-lg md:text-xl font-bold text-gray-800 flex items-center gap-2">
                                 <FileIcon />
-                                インサートPDF
+                                インサートPDF作成
                             </h1>
-                            <p className="text-xs text-gray-500 mt-1">スマホ・PC両対応レイアウトツール</p>
                         </header>
 
                         {/* Settings */}
                         <div className="space-y-4 border-t pt-4 border-gray-100">
                             <div className="flex justify-between items-center mb-2">
                                 <h2 className="text-sm font-bold text-gray-700">レイアウト設定</h2>
-                                <button onClick={toggleUnit} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded text-gray-600 font-medium transition">
-                                    単位: {settings.unit}
-                                </button>
+                                <div className="flex gap-2">
+                                    <button onClick={resetSettings} className="text-xs flex items-center gap-1 bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded text-gray-600 font-medium transition" title="デフォルト設定に戻す">
+                                        <RefreshIcon className="w-3 h-3"/> リセット
+                                    </button>
+                                    <button onClick={toggleUnit} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded text-gray-600 font-medium transition">
+                                        単位: {settings.unit}
+                                    </button>
+                                </div>
                             </div>
                             
                             <div>
@@ -445,15 +520,55 @@
                                 </div>
                             </div>
 
-                            <div>
-                                <label className="block text-sm font-medium text-gray-600 mb-1">画像の高さ</label>
-                                <NumberStepper 
-                                    value={toDisplay(settings.targetHeight)}
-                                    onChange={(val) => handleSettingChange('targetHeight', val)}
-                                    step={displayUnit === 'cm' ? "0.1" : "1"}
-                                    min={1}
-                                    unitLabel={displayUnit}
-                                />
+                            <div className="bg-blue-50/50 p-3 rounded border border-blue-100/50 space-y-3">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-600 mb-1">画像の高さ (縦幅)</label>
+                                    <NumberStepper 
+                                        value={toDisplay(settings.targetHeight)}
+                                        onChange={(val) => handleSettingChange('targetHeight', val)}
+                                        step={displayUnit === 'cm' ? "0.1" : "1"}
+                                        min={1}
+                                        unitLabel={displayUnit}
+                                        defaultValue={displayUnit === 'cm' ? 9.0 : 90}
+                                    />
+                                </div>
+
+                                <div className="pt-1">
+                                    <label className="flex items-center gap-2 cursor-pointer mb-2">
+                                        <input 
+                                            type="checkbox" 
+                                            checked={settings.ignoreAspectRatio} 
+                                            onChange={(e) => setSettings(p => ({...p, ignoreAspectRatio: e.target.checked}))} 
+                                            className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4" 
+                                        />
+                                        <span className="text-sm font-bold text-gray-700">アスペクト比を無視して横幅を指定</span>
+                                    </label>
+
+                                    <div className={`transition-opacity pl-6 ${settings.ignoreAspectRatio ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
+                                        <div className="flex justify-between items-end mb-1">
+                                            <label className="block text-sm font-medium text-gray-600">画像の横幅</label>
+                                            <div className="flex gap-1">
+                                                <button 
+                                                    onClick={() => setSettings(p => ({...p, targetWidth: 25}))}
+                                                    className="text-xs bg-white border border-gray-300 shadow-sm hover:bg-gray-50 text-gray-700 px-2 py-1 rounded transition-colors"
+                                                >G3 (2.5cm)</button>
+                                                <button 
+                                                    onClick={() => setSettings(p => ({...p, targetWidth: 22}))}
+                                                    className="text-xs bg-white border border-gray-300 shadow-sm hover:bg-gray-50 text-gray-700 px-2 py-1 rounded transition-colors"
+                                                >rsvp (2.2cm)</button>
+                                            </div>
+                                        </div>
+                                        <NumberStepper 
+                                            value={toDisplay(settings.targetWidth)}
+                                            onChange={(val) => handleSettingChange('targetWidth', val)}
+                                            step={displayUnit === 'cm' ? "0.1" : "1"}
+                                            min={1}
+                                            unitLabel={displayUnit}
+                                            disabled={!settings.ignoreAspectRatio}
+                                            defaultValue={displayUnit === 'cm' ? 2.5 : 25}
+                                        />
+                                    </div>
+                                </div>
                             </div>
 
                             <div className="grid grid-cols-2 gap-3">
@@ -465,6 +580,7 @@
                                         step={displayUnit === 'cm' ? "0.1" : "1"}
                                         min={0}
                                         unitLabel={displayUnit}
+                                        defaultValue={displayUnit === 'cm' ? 0.3 : 3}
                                     />
                                 </div>
                                 <div>
@@ -475,6 +591,7 @@
                                         step={displayUnit === 'cm' ? "0.1" : "1"}
                                         min={0}
                                         unitLabel={displayUnit}
+                                        defaultValue={displayUnit === 'cm' ? 0.2 : 2}
                                     />
                                 </div>
                             </div>
@@ -517,12 +634,14 @@
                             </button>
                         </div>
                         
-                        {/* File List (Collapsible on mobile maybe? For now just show) */}
+                        {/* File List */}
                         <div className="flex-1 overflow-y-auto max-h-[150px] md:max-h-none md:min-h-[100px] border-t pt-4">
                              <div className="flex justify-between items-center mb-2">
                                 <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">画像一覧 ({images.length})</h3>
                                 {images.length > 0 && (
-                                    <button onClick={() => setImages([])} className="text-xs text-red-400 hover:text-red-600">全削除</button>
+                                    <button onClick={clearImages} className="text-xs flex items-center gap-1 bg-red-50 text-red-500 hover:bg-red-100 px-2 py-1 rounded transition">
+                                        <TrashIcon className="w-3 h-3" /> 全消去
+                                    </button>
                                 )}
                              </div>
                              <div className="space-y-2">
@@ -542,20 +661,15 @@
                         </div>
                     </div>
 
-                    {/* Preview Area (Paginated) */}
+                    {/* Preview Area */}
                     <div className="flex-1 bg-gray-300/50 rounded-xl overflow-hidden shadow-inner flex flex-col md:h-[calc(100vh-2rem)] h-[500px] border border-gray-200">
                         <div className="bg-white border-b px-4 py-2 flex justify-between items-center text-xs text-gray-500 shadow-sm z-10">
                             <span>プレビュー ({layoutPages.length}ページ)</span>
                             <span>{currentPaper.name} / {settings.unit === 'cm' ? 'cm' : 'mm'}</span>
                         </div>
                         
-                        {/* Scrollable Container */}
-                        <main 
-                            ref={previewContainerRef}
-                            className="flex-1 overflow-auto p-4 md:p-8 preview-scroll relative bg-gray-300/50"
-                        >
+                        <main ref={previewContainerRef} className="flex-1 overflow-auto p-4 md:p-8 preview-scroll relative bg-gray-300/50">
                             <div className="flex flex-col gap-4 md:gap-8 items-center min-w-full pb-8">
-                                
                                 {layoutPages.length === 0 && (
                                     <div 
                                         className="bg-white shadow-xl flex items-center justify-center text-gray-300 rounded-sm transition-transform duration-300 origin-top"
@@ -563,13 +677,12 @@
                                             width: `${currentPaper.width * MM_TO_PX}px`,
                                             height: `${currentPaper.height * MM_TO_PX}px`,
                                             transform: `scale(${previewScale})`,
-                                            marginBottom: `-${(1 - previewScale) * (currentPaper.height * MM_TO_PX)}px` // Fix excess whitespace when scaled down
+                                            marginBottom: `-${(1 - previewScale) * (currentPaper.height * MM_TO_PX)}px`
                                         }}
                                     >
                                         <div className="text-center">
                                             <p className="text-4xl mb-2">📄</p>
                                             <p>ここにプレビューが表示されます</p>
-                                            <p className="text-sm mt-1">({currentPaper.name})</p>
                                         </div>
                                     </div>
                                 )}
@@ -582,21 +695,15 @@
                                             width: `${currentPaper.width * MM_TO_PX}px`,
                                             height: `${currentPaper.height * MM_TO_PX}px`,
                                             transform: `scale(${previewScale})`,
-                                            // Scaled margin trick to reduce gap between pages when scaled
                                             marginBottom: pIndex === layoutPages.length - 1 ? 0 : `-${(1 - previewScale) * (currentPaper.height * MM_TO_PX)}px`
                                         }}
                                     >
-                                        {/* Page with dynamic size */}
-                                        <div 
-                                            className="bg-white shadow-xl relative overflow-hidden h-full w-full"
-                                        >
-                                            {/* Render Items */}
+                                        <div className="bg-white shadow-xl relative overflow-hidden h-full w-full">
                                             {pageItems.map((item) => (
                                                 <div 
                                                     key={item.id}
                                                     className="absolute group transition-all duration-300"
                                                     style={{
-                                                        // Convert mm coordinates to px for preview
                                                         left: `${(item.x + settings.margin) * MM_TO_PX}px`,
                                                         top: `${(item.y + settings.margin) * MM_TO_PX}px`,
                                                         width: `${item.w * MM_TO_PX}px`,
@@ -605,36 +712,21 @@
                                                 >
                                                     <img 
                                                         src={item.preview} 
-                                                        className="w-full h-full object-contain bg-gray-50"
+                                                        className="w-full h-full bg-gray-50"
                                                         style={{
+                                                            objectFit: settings.ignoreAspectRatio ? 'fill' : 'contain',
                                                             outline: settings.showGuides ? '1px dashed #cbd5e1' : 'none'
                                                         }}
                                                     />
-                                                    
-                                                    {/* ホバー時の操作ボタン (スマホでは常時表示に近い形が良いが、タップで出るように透明度調整) */}
                                                     <div className="absolute top-0 right-0 p-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity flex gap-1">
-                                                        <button 
-                                                            onClick={() => rotateImage(item.id)}
-                                                            className="bg-white/90 text-gray-600 rounded shadow p-1 hover:text-blue-600 hover:bg-white transform active:scale-95 z-10"
-                                                            title="回転"
-                                                        >
-                                                            <RotateIcon />
-                                                        </button>
-                                                        <button 
-                                                            onClick={() => removeImage(item.id)}
-                                                            className="bg-red-500/90 text-white rounded shadow p-1 hover:bg-red-600 transform active:scale-95 z-10"
-                                                            title="削除"
-                                                        >
-                                                            <TrashIcon />
-                                                        </button>
+                                                        <button onClick={() => rotateImage(item.id)} className="bg-white/90 text-gray-600 rounded shadow p-1 hover:text-blue-600 hover:bg-white transform active:scale-95 z-10" title="回転"><RotateIcon /></button>
+                                                        <button onClick={() => removeImage(item.id)} className="bg-red-500/90 text-white rounded shadow p-1 hover:bg-red-600 transform active:scale-95 z-10" title="削除"><TrashIcon /></button>
                                                     </div>
                                                 </div>
                                             ))}
 
-                                            {/* Margins Guide (Visual Aid) */}
                                             {settings.showGuides && (
-                                                <div 
-                                                    className="absolute border border-blue-200 pointer-events-none opacity-20"
+                                                <div className="absolute border border-blue-200 pointer-events-none opacity-20"
                                                     style={{
                                                         left: `${settings.margin * MM_TO_PX}px`,
                                                         top: `${settings.margin * MM_TO_PX}px`,
@@ -644,15 +736,7 @@
                                                 />
                                             )}
                                         </div>
-                                        
-                                        {/* Page Number (Outside the scaled div but positioned relative to it, need to handle scaling) */}
-                                        <div 
-                                            className="absolute -bottom-10 w-full text-center text-lg text-gray-500 font-medium"
-                                            style={{
-                                                // Counter-scale text to keep it readable? Or just let it scale. Let it scale is easier.
-                                                // Actually, if we scale the parent div, this scales too.
-                                            }}
-                                        >
+                                        <div className="absolute -bottom-10 w-full text-center text-lg text-gray-500 font-medium">
                                             {currentPaper.name} - Page {pIndex + 1}
                                         </div>
                                     </div>
