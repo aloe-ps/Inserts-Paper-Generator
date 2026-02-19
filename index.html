@@ -71,7 +71,9 @@
 
         const App = () => {
             // --- State ---
-            const [images, setImages] = useState([]); // { id, src, width, height, originalName }
+            // images: { id, src, width, height, originalName, originalSrc }
+            // originalSrcを追加して、回転変更時に劣化なく再生成できるようにする
+            const [images, setImages] = useState([]); 
             const [isProcessing, setIsProcessing] = useState(false);
             
             const [settings, setSettings] = useState({
@@ -79,6 +81,7 @@
                 targetHeight: 80, // mm
                 margin: 10,       // mm
                 gap: 5,           // mm
+                orientation: 'portrait' // 'portrait' | 'landscape'
             });
             
             // UI用状態
@@ -89,42 +92,62 @@
             const previewContainerRef = useRef(null);
 
             // --- 画像処理ロジック ---
+
+            // 指定された向きに合わせて画像を処理するヘルパー関数
+            // originalImg: Imageオブジェクト (srcロード済み)
+            // targetOrientation: 'portrait' | 'landscape'
+            const applyOrientation = (originalImg, targetOrientation) => {
+                const w = originalImg.width;
+                const h = originalImg.height;
+                const isPortrait = h >= w;
+                const isTargetPortrait = targetOrientation === 'portrait';
+
+                // 現在の向きとターゲットが一致している場合はそのまま
+                if (isPortrait === isTargetPortrait) {
+                    return {
+                        src: originalImg.src,
+                        width: w,
+                        height: h
+                    };
+                }
+
+                // 回転が必要な場合 (Canvasで90度回転)
+                const canvas = document.createElement('canvas');
+                canvas.width = h;
+                canvas.height = w;
+                const ctx = canvas.getContext('2d');
+                
+                ctx.translate(canvas.width / 2, canvas.height / 2);
+                ctx.rotate(90 * Math.PI / 180);
+                ctx.drawImage(originalImg, -w / 2, -h / 2);
+                
+                return {
+                    src: canvas.toDataURL('image/jpeg', 0.9),
+                    width: h, // 幅と高さが入れ替わる
+                    height: w
+                };
+            };
+
             const processImageFile = (file) => {
                 return new Promise((resolve) => {
                     const reader = new FileReader();
                     reader.onload = (e) => {
+                        const originalSrc = e.target.result;
                         const img = new Image();
                         img.onload = () => {
-                            let width = img.width;
-                            let height = img.height;
-                            let src = img.src;
-
-                            // 横長（Width > Height）の場合、90度回転させて縦長にする
-                            if (width > height) {
-                                const canvas = document.createElement('canvas');
-                                canvas.width = height;
-                                canvas.height = width;
-                                const ctx = canvas.getContext('2d');
-                                
-                                // キャンバスの中心を原点に移動し、回転
-                                ctx.translate(canvas.width / 2, canvas.height / 2);
-                                ctx.rotate(90 * Math.PI / 180);
-                                ctx.drawImage(img, -width / 2, -height / 2);
-                                
-                                src = canvas.toDataURL('image/jpeg', 0.9);
-                                // 幅と高さを入れ替え
-                                [width, height] = [height, width];
-                            }
+                            // 設定された向きに合わせて処理
+                            const processed = applyOrientation(img, settings.orientation);
 
                             resolve({
                                 id: Math.random().toString(36).substr(2, 9),
-                                src: src,
-                                width: width,
-                                height: height,
+                                src: processed.src,
+                                width: processed.width,
+                                height: processed.height,
+                                originalSrc: originalSrc, // 元データを保持
                                 originalName: file.name
                             });
                         };
-                        img.src = e.target.result;
+                        img.src = originalSrc;
                     };
                     reader.readAsDataURL(file);
                 });
@@ -135,10 +158,40 @@
                 if (files.length === 0) return;
 
                 setIsProcessing(true);
+                // 現在の設定(settings.orientation)を使って処理
                 const processedImages = await Promise.all(files.map(processImageFile));
                 setImages(prev => [...prev, ...processedImages]);
                 setIsProcessing(false);
                 e.target.value = ''; // Reset input
+            };
+
+            // 向き設定の変更ハンドラ
+            const handleOrientationChange = async (newOrientation) => {
+                if (newOrientation === settings.orientation) return;
+                
+                setIsProcessing(true);
+                
+                // 既存の画像をすべて再処理
+                const reprocessedImages = await Promise.all(images.map(async (item) => {
+                    return new Promise((resolve) => {
+                        const img = new Image();
+                        img.onload = () => {
+                            const processed = applyOrientation(img, newOrientation);
+                            resolve({
+                                ...item,
+                                src: processed.src,
+                                width: processed.width,
+                                height: processed.height
+                            });
+                        };
+                        // originalSrcがあればそれを使う（画質劣化防止）
+                        img.src = item.originalSrc || item.src;
+                    });
+                }));
+
+                setImages(reprocessedImages);
+                setSettings(prev => ({ ...prev, orientation: newOrientation }));
+                setIsProcessing(false);
             };
 
             const removeImage = (id) => {
@@ -168,6 +221,7 @@
                 let currentY = settings.margin;
 
                 images.forEach((img) => {
+                    // targetHeightに合わせてスケーリング
                     const scaleFactor = settings.targetHeight / img.height;
                     const displayWidth = img.width * scaleFactor;
                     const displayHeight = settings.targetHeight;
@@ -203,7 +257,7 @@
 
                 setLayoutPages(pages);
 
-            }, [images, settings]);
+            }, [images, settings]); // settings変更時（orientation含む）に再計算
 
             // --- プレビューのレスポンシブスケール計算 ---
             useEffect(() => {
@@ -212,7 +266,7 @@
                     if (!container) return;
                     
                     const paper = PAPER_SIZES[settings.paperSize];
-                    // コンテナのパディング分を引く (px-8 py-8 = 32px*2 = 64px)
+                    // コンテナのパディング分
                     const paddingX = 64;
                     const paddingY = 64;
                     
@@ -221,44 +275,29 @@
 
                     if (availableWidth <= 0 || availableHeight <= 0) return;
 
-                    // ページ全体が収まるように比率を計算 (Fit Page)
                     const scaleW = availableWidth / paper.width;
                     const scaleH = availableHeight / paper.height;
                     
-                    // 小さい方の倍率を採用（はみ出さないように）
-                    // ただし極端に大きくならないよう上限を設定
                     let newScale = Math.min(scaleW, scaleH);
-                    
-                    // モバイルなどで極端に小さくなりすぎるのを防ぐ場合はここで調整可能
-                    // 今回は「画面に応じて変化」なのでFitさせる
-                    
                     setPreviewScale(newScale);
                 };
 
-                // ResizeObserverでコンテナサイズの変更を監視
                 const observer = new ResizeObserver(updateScale);
                 if (previewContainerRef.current) {
                     observer.observe(previewContainerRef.current);
                 }
-                
-                // 初回実行
                 updateScale();
-
                 return () => observer.disconnect();
-            }, [settings.paperSize]); // 用紙サイズが変わったら再計算
-
+            }, [settings.paperSize]);
 
             // --- 単位変換ヘルパー ---
-            // mm -> 表示値
             const toDisplay = (mmVal) => {
                 if (displayUnit === 'cm') {
-                    // 小数点第2位までなど丸め処理を考慮
                     return Math.round((mmVal / 10) * 100) / 100;
                 }
                 return mmVal;
             };
 
-            // 表示値 -> mm
             const fromDisplay = (dispVal) => {
                 if (displayUnit === 'cm') {
                     return dispVal * 10;
@@ -275,7 +314,6 @@
                     [key]: fromDisplay(numVal)
                 }));
             };
-
 
             // --- PDF生成 ---
             const generatePDF = () => {
@@ -364,7 +402,7 @@
                                             )}
                                         </div>
                                     </div>
-                                    <p className="text-xs text-gray-500 mt-2">※ 横長の画像は自動で縦向きに回転します</p>
+                                    <p className="text-xs text-gray-500 mt-2">※ 設定した向きに合わせて自動回転します</p>
                                 </div>
 
                                 <hr className="border-gray-100" />
@@ -402,6 +440,35 @@
                                                 <option key={size} value={size}>{size}</option>
                                             ))}
                                         </select>
+                                    </div>
+
+                                    {/* Orientation Settings */}
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-600 mb-1">画像の向き</label>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <button
+                                                onClick={() => handleOrientationChange('portrait')}
+                                                className={`px-3 py-2 text-sm rounded border flex items-center justify-center gap-2 transition ${
+                                                    settings.orientation === 'portrait' 
+                                                    ? 'bg-blue-50 border-blue-500 text-blue-700 font-medium' 
+                                                    : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
+                                                }`}
+                                            >
+                                                <div className="w-3 h-4 border border-current rounded-sm"></div>
+                                                縦 (Portrait)
+                                            </button>
+                                            <button
+                                                onClick={() => handleOrientationChange('landscape')}
+                                                className={`px-3 py-2 text-sm rounded border flex items-center justify-center gap-2 transition ${
+                                                    settings.orientation === 'landscape' 
+                                                    ? 'bg-blue-50 border-blue-500 text-blue-700 font-medium' 
+                                                    : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
+                                                }`}
+                                            >
+                                                <div className="w-4 h-3 border border-current rounded-sm"></div>
+                                                横 (Landscape)
+                                            </button>
+                                        </div>
                                     </div>
 
                                     <div>
