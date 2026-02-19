@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>インサート配置＆PDF生成ツール</title>
+    <title>インサート配置＆PDF生成ツール（自動回転対応）</title>
     
     <!-- React & ReactDOM -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -23,22 +23,20 @@
             background-color: #f3f4f6;
             font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif;
         }
-        /* Custom scrollbar for preview area */
         .preview-scroll::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
+            width: 10px;
+            height: 10px;
         }
         .preview-scroll::-webkit-scrollbar-track {
-            background: #f1f1f1; 
+            background: #e5e7eb; 
         }
         .preview-scroll::-webkit-scrollbar-thumb {
-            background: #c1c1c1; 
-            border-radius: 4px;
+            background: #9ca3af; 
+            border-radius: 5px;
         }
         .preview-scroll::-webkit-scrollbar-thumb:hover {
-            background: #a8a8a8; 
+            background: #6b7280; 
         }
-        /* Hide number input spinners in some browsers to keep UI clean */
         input[type=number]::-webkit-inner-spin-button, 
         input[type=number]::-webkit-outer-spin-button { 
             -webkit-appearance: none; 
@@ -56,14 +54,8 @@
         const { useState, useEffect, useRef, useMemo } = React;
 
         // --- Icons ---
-        const UploadIcon = () => (
-            <svg className="w-8 h-8 text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
-            </svg>
-        );
-
         const TrashIcon = () => (
-            <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
             </svg>
         );
@@ -86,20 +78,21 @@
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
         );
+        
+        const RotateIcon = () => (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+            </svg>
+        );
 
         // --- Components ---
 
-        // 数値入力用ステッパーコンポーネント (New!)
         const NumberStepper = ({ value, onChange, step, min = 0, unitLabel }) => {
-            const inputRef = useRef(null);
-
             const handleDecrement = () => {
                 const current = parseFloat(value) || 0;
                 const stepNum = parseFloat(step) || 1;
                 let newVal = current - stepNum;
                 if (newVal < min) newVal = min;
-                
-                // 小数点の精度調整 (例: 0.1 + 0.2 = 0.3000000004 を防ぐ)
                 const precision = step.toString().split('.')[1]?.length || 0;
                 onChange(Number(newVal.toFixed(precision)));
             };
@@ -108,132 +101,166 @@
                 const current = parseFloat(value) || 0;
                 const stepNum = parseFloat(step) || 1;
                 const newVal = current + stepNum;
-                
                 const precision = step.toString().split('.')[1]?.length || 0;
                 onChange(Number(newVal.toFixed(precision)));
             };
 
             return (
                 <div className="flex items-center w-full border border-gray-300 rounded focus-within:ring-2 focus-within:ring-blue-500 overflow-hidden bg-white shadow-sm">
-                    {/* マイナスボタン */}
-                    <button 
-                        type="button" 
-                        onClick={handleDecrement} 
-                        className="w-10 h-10 flex items-center justify-center bg-gray-50 text-gray-500 hover:bg-gray-200 hover:text-gray-700 active:bg-gray-300 border-r border-gray-300 transition-colors focus:outline-none"
-                        tabIndex="-1"
-                    >
+                    <button type="button" onClick={handleDecrement} className="w-10 h-10 flex items-center justify-center bg-gray-50 text-gray-500 hover:bg-gray-200 border-r border-gray-300 transition-colors focus:outline-none">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                     </button>
-                    
-                    {/* 数値入力 */}
-                    <input 
-                        ref={inputRef}
-                        type="number" 
-                        step={step} 
-                        min={min}
-                        value={value} 
-                        onChange={(e) => onChange(e.target.value)}
-                        className="w-full h-10 text-center text-gray-700 font-medium focus:outline-none"
-                    />
-                    
-                    {/* プラスボタン */}
-                    <button 
-                        type="button" 
-                        onClick={handleIncrement} 
-                        className="w-10 h-10 flex items-center justify-center bg-gray-50 text-gray-500 hover:bg-gray-200 hover:text-gray-700 active:bg-gray-300 border-l border-gray-300 transition-colors focus:outline-none"
-                        tabIndex="-1"
-                    >
+                    <input type="number" step={step} min={min} value={value} onChange={(e) => onChange(e.target.value)} className="w-full h-10 text-center text-gray-700 font-medium focus:outline-none" />
+                    <button type="button" onClick={handleIncrement} className="w-10 h-10 flex items-center justify-center bg-gray-50 text-gray-500 hover:bg-gray-200 border-l border-gray-300 transition-colors focus:outline-none">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                     </button>
-                    
-                    {/* 単位ラベル（ある場合のみ表示） */}
-                    {unitLabel && (
-                        <div className="bg-gray-100 border-l border-gray-300 px-2 h-10 flex items-center justify-center text-xs text-gray-500 w-10 flex-shrink-0 font-medium select-none">
-                            {unitLabel}
-                        </div>
-                    )}
+                    {unitLabel && <div className="bg-gray-100 border-l border-gray-300 px-2 h-10 flex items-center justify-center text-xs text-gray-500 w-10 flex-shrink-0 font-medium select-none">{unitLabel}</div>}
                 </div>
             );
         };
 
-
         const App = () => {
-            // A4 size in mm
             const A4_WIDTH_MM = 210;
             const A4_HEIGHT_MM = 297;
-            const PX_TO_MM_SCALE = 3.7795275591; // 1mm = 3.78px approx (at 96 DPI)
 
             const [images, setImages] = useState([]);
             const [isDragging, setIsDragging] = useState(false);
             const [isGenerating, setIsGenerating] = useState(false);
             
-            // Settings
             const [settings, setSettings] = useState({
-                targetHeight: 50, // mm (default 5cm)
-                margin: 10,       // mm
+                targetHeight: 50, // mm
+                margin: 15,       // mm
                 gap: 5,           // mm
                 showGuides: true,
-                paperSize: 'a4', // 'a4' only for now
-                unit: 'cm'       // 'mm' or 'cm' for display
+                unit: 'cm'        // 'mm' or 'cm'
             });
 
-            // Conversion helpers
-            const toMm = (val, unit) => unit === 'cm' ? val * 10 : val;
             const toDisplay = (valMm) => settings.unit === 'cm' ? parseFloat((valMm / 10).toFixed(2)) : Math.round(valMm);
             const fromDisplay = (val) => settings.unit === 'cm' ? val * 10 : val;
 
             const handleSettingChange = (key, displayValue) => {
                 const numVal = parseFloat(displayValue);
                 if (isNaN(numVal)) return;
-
-                // Convert display value back to mm for internal storage
-                const mmVal = fromDisplay(numVal);
-                setSettings(prev => ({ ...prev, [key]: mmVal }));
+                setSettings(prev => ({ ...prev, [key]: fromDisplay(numVal) }));
             };
 
             const toggleUnit = () => {
                 setSettings(prev => ({ ...prev, unit: prev.unit === 'mm' ? 'cm' : 'mm' }));
             };
 
-            const handleFiles = (files) => {
-                const newImages = Array.from(files)
-                    .filter(file => file.type.startsWith('image/'))
-                    .map(file => ({
-                        file,
-                        id: Math.random().toString(36).substr(2, 9),
-                        preview: URL.createObjectURL(file),
-                        name: file.name
-                    }));
+            // Helper: Canvasを使って画像を回転させる
+            const createRotatedImage = (imgSource, angle = 90) => {
+                return new Promise((resolve) => {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    
+                    const isPortrait = angle % 180 === 0;
+                    
+                    // 回転後のサイズ設定
+                    if (isPortrait) {
+                         canvas.width = imgSource.width;
+                         canvas.height = imgSource.height;
+                    } else {
+                         canvas.width = imgSource.height;
+                         canvas.height = imgSource.width;
+                    }
+
+                    // 回転の中心へ移動
+                    ctx.translate(canvas.width / 2, canvas.height / 2);
+                    ctx.rotate(angle * Math.PI / 180);
+                    ctx.drawImage(imgSource, -imgSource.width / 2, -imgSource.height / 2);
+                    
+                    // データURLとして出力
+                    resolve({
+                        preview: canvas.toDataURL('image/jpeg', 0.90),
+                        width: canvas.width,
+                        height: canvas.height
+                    });
+                });
+            };
+
+            const handleFiles = async (files) => {
+                const fileList = Array.from(files).filter(file => file.type.startsWith('image/'));
+                if (fileList.length === 0) return;
+
+                const loadedImages = await Promise.all(fileList.map(file => {
+                    return new Promise((resolve) => {
+                        const img = new Image();
+                        const rawUrl = URL.createObjectURL(file);
+                        
+                        img.onload = async () => {
+                            let resultPreview = rawUrl;
+                            let resultW = img.naturalWidth;
+                            let resultH = img.naturalHeight;
+
+                            // 自動回転ロジック: 横長(幅 > 高さ)なら90度回転
+                            if (resultW > resultH) {
+                                const rotated = await createRotatedImage(img, 90);
+                                resultPreview = rotated.preview;
+                                resultW = rotated.width;
+                                resultH = rotated.height;
+                                // 元のURLは不要になるので解放
+                                URL.revokeObjectURL(rawUrl); 
+                            }
+
+                            resolve({
+                                file,
+                                id: Math.random().toString(36).substr(2, 9),
+                                preview: resultPreview,
+                                name: file.name,
+                                width: resultW,
+                                height: resultH,
+                                aspectRatio: resultW / resultH
+                            });
+                        };
+                        img.src = rawUrl;
+                    });
+                }));
                 
-                setImages(prev => [...prev, ...newImages]);
+                setImages(prev => [...prev, ...loadedImages]);
             };
 
-            const onDragOver = (e) => {
-                e.preventDefault();
-                setIsDragging(true);
-            };
+            // 手動回転機能 (90度回転)
+            const rotateImage = async (id) => {
+                const targetIndex = images.findIndex(img => img.id === id);
+                if (targetIndex === -1) return;
 
-            const onDragLeave = (e) => {
-                e.preventDefault();
-                setIsDragging(false);
-            };
+                const targetImg = images[targetIndex];
+                
+                // 現在のプレビューからImageオブジェクトを作成
+                const imgObj = new Image();
+                imgObj.src = targetImg.preview;
+                await new Promise(r => imgObj.onload = r);
 
-            const onDrop = (e) => {
-                e.preventDefault();
-                setIsDragging(false);
-                handleFiles(e.dataTransfer.files);
+                // 90度回転
+                const rotated = await createRotatedImage(imgObj, 90);
+
+                setImages(prev => {
+                    const next = [...prev];
+                    next[targetIndex] = {
+                        ...targetImg,
+                        preview: rotated.preview,
+                        width: rotated.width,
+                        height: rotated.height,
+                        aspectRatio: rotated.width / rotated.height
+                    };
+                    return next;
+                });
             };
 
             const removeImage = (id) => {
                 setImages(prev => {
                     const target = prev.find(img => img.id === id);
-                    if (target) URL.revokeObjectURL(target.preview); // Cleanup
+                    // Blob URLの場合は解放（Data URLなら何もしない）
+                    if (target && target.preview.startsWith('blob:')) {
+                        URL.revokeObjectURL(target.preview);
+                    }
                     return prev.filter(img => img.id !== id);
                 });
             };
 
-            // Layout Calculation
-            const layout = useMemo(() => {
+            // --- Layout Calculation (Pagination Logic) ---
+            const layoutPages = useMemo(() => {
                 const pageW = A4_WIDTH_MM;
                 const pageH = A4_HEIGHT_MM;
                 const margin = settings.margin;
@@ -243,37 +270,54 @@
                 const contentW = pageW - (margin * 2);
                 const contentH = pageH - (margin * 2);
 
-                let currentPage = [];
-                const pages = [currentPage];
-                
-                let currentX = margin;
-                let currentY = margin;
-                let currentRowHeight = 0;
+                let pages = [];
+                let currentPageItems = [];
+                let currentX = 0; // Relative to content area
+                let currentY = 0; // Relative to content area
+
+                const finalizePage = () => {
+                    if (currentPageItems.length > 0) {
+                        pages.push(currentPageItems);
+                    }
+                    currentPageItems = [];
+                    currentX = 0;
+                    currentY = 0;
+                };
 
                 images.forEach((img) => {
-                    // Load image dimensions (using natural aspect ratio)
-                    // Since we can't synchronously get image dimensions from File object without loading,
-                    // We'll estimate or use a placeholder aspect ratio if not loaded yet.
-                    // For precise PDF, we need to load them. 
-                    // In this UI, let's assume images are roughly standard. 
-                    // *Wait*, for PDF generation we need real aspect ratios.
-                    // For the preview UI, we might simply display them in a flex grid.
-                    // BUT, to show "pages", we need to know how many fit.
-                    
-                    // Simple logic: We assume a fixed height, so width varies by aspect ratio.
-                    // To make this robust without async loading complexity in this simple file:
-                    // We will just render the images in the preview area using CSS flex/wrap logic 
-                    // that mimics the print layout, but simplified.
-                    // The PDF generation function will handle the strict layout.
-                    
-                    // For the PREVIEW list below:
-                    // We just return the list. The actual visual pagination in HTML 
-                    // is hard without pre-calculating every image size.
-                    // So we will show a "Continuous Scroll" preview, but mark page breaks if possible?
-                    // Let's stick to a continuous list for the UI preview, and trust the PDF generator.
+                    // 画像サイズ計算
+                    const printH = targetH;
+                    const printW = targetH * img.aspectRatio;
+
+                    // 行からはみ出るかチェック
+                    if (currentX + printW > contentW && currentX > 0) {
+                        currentX = 0;
+                        currentY += targetH + gap;
+                    }
+
+                    // ページからはみ出るかチェック (高さ)
+                    if (currentY + targetH > contentH) {
+                        finalizePage();
+                    }
+
+                    // 配置
+                    currentPageItems.push({
+                        ...img,
+                        x: currentX, // Relative coordinates
+                        y: currentY,
+                        w: printW,
+                        h: printH
+                    });
+
+                    // 次の開始位置へ
+                    currentX += printW + gap;
                 });
 
-                return { pages }; 
+                if (currentPageItems.length > 0) {
+                    pages.push(currentPageItems);
+                }
+
+                return pages;
             }, [images, settings]);
 
 
@@ -282,7 +326,6 @@
                 setIsGenerating(true);
 
                 try {
-                    // Create PDF
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({
                         orientation: 'p',
@@ -291,66 +334,39 @@
                     });
 
                     const margin = settings.margin;
-                    const gap = settings.gap;
-                    const targetH = settings.targetHeight;
-                    const pageW = A4_WIDTH_MM;
-                    const pageH = A4_HEIGHT_MM;
-                    const cursorStartX = margin;
-                    const cursorStartY = margin;
-                    const maxRowW = pageW - margin;
 
-                    let cursorX = cursorStartX;
-                    let cursorY = cursorStartY;
-                    let currentRowMaxH = 0; // Track max height in current row (though we force height, helpful if we change logic)
+                    for (let pIndex = 0; pIndex < layoutPages.length; pIndex++) {
+                        const pageItems = layoutPages[pIndex];
+                        if (pIndex > 0) doc.addPage();
 
-                    // Helper to load image to get dimensions
-                    const loadImage = (src) => new Promise((resolve) => {
-                        const img = new Image();
-                        img.onload = () => resolve(img);
-                        img.src = src;
-                    });
+                        for (const item of pageItems) {
+                            // Canvas経由で画像データを生成
+                            // (すでに回転済みのpreviewを使っているのでそのまま描画でOK)
+                            const imgObj = await new Promise((resolve) => {
+                                const img = new Image();
+                                img.onload = () => resolve(img);
+                                img.src = item.preview;
+                            });
 
-                    for (let i = 0; i < images.length; i++) {
-                        const imgData = images[i];
-                        const imgObj = await loadImage(imgData.preview);
-                        
-                        // Calculate dimensions
-                        const aspectRatio = imgObj.width / imgObj.height;
-                        const printH = targetH;
-                        const printW = targetH * aspectRatio;
+                            const canvas = document.createElement('canvas');
+                            canvas.width = imgObj.width; // Use stored width (pixel)
+                            canvas.height = imgObj.height;
+                            const ctx = canvas.getContext('2d');
+                            ctx.drawImage(imgObj, 0, 0);
+                            const dataUrl = canvas.toDataURL('image/jpeg', 0.90);
 
-                        // Check if it fits on current row
-                        if (cursorX + printW > maxRowW) {
-                            // New Row
-                            cursorX = cursorStartX;
-                            cursorY += targetH + gap;
-                            
-                            // Check if new row fits on page
-                            if (cursorY + targetH > pageH - margin) {
-                                // New Page
-                                doc.addPage();
-                                cursorX = cursorStartX;
-                                cursorY = cursorStartY;
-                            }
+                            doc.addImage(
+                                dataUrl, 
+                                'JPEG', 
+                                item.x + margin, 
+                                item.y + margin, 
+                                item.w, 
+                                item.h
+                            );
                         }
-
-                        // Add image
-                        // To support different file types properly, convert canvas if needed, 
-                        // but jsPDF supports basic types.
-                        // Safe approach: Draw to canvas, get JPEG/PNG data
-                        const canvas = document.createElement('canvas');
-                        canvas.width = imgObj.width;
-                        canvas.height = imgObj.height;
-                        const ctx = canvas.getContext('2d');
-                        ctx.drawImage(imgObj, 0, 0);
-                        const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
-
-                        doc.addImage(dataUrl, 'JPEG', cursorX, cursorY, printW, printH);
-
-                        cursorX += printW + gap;
                     }
 
-                    doc.save("photos_layout.pdf");
+                    doc.save("photo_layout.pdf");
 
                 } catch (e) {
                     console.error(e);
@@ -361,39 +377,28 @@
             };
 
             const displayUnit = settings.unit;
-            
-            // Preview scaling
-            const previewScale = 1; // 1px = 1mm (roughly on screen?) No, screen is usually 96dpi.
-            // 1mm = 3.78px. Let's make the preview roughly accurate to physical size on screen if possible,
-            // or just fit-to-width.
-            // Let's use a scale factor for the preview container.
-            
+
             return (
                 <div className="min-h-screen flex flex-col md:flex-row max-w-7xl mx-auto p-4 gap-6">
                     
-                    {/* Left Sidebar: Controls */}
+                    {/* Controls */}
                     <div className="w-full md:w-80 flex flex-col gap-6 bg-white p-6 rounded-xl shadow-sm border border-gray-200 h-fit sticky top-4">
                         <header>
                             <h1 className="text-xl font-bold text-gray-800 flex items-center gap-2">
                                 <FileIcon />
                                 インサートPDFメーカー
                             </h1>
-                            <p className="text-sm text-gray-500 mt-1">写真を並べてPDFにします</p>
+                            <p className="text-xs text-gray-500 mt-1">自動回転・ページ分け機能付き</p>
                         </header>
 
-                        {/* Settings */}
                         <div className="space-y-4 border-t pt-4 border-gray-100">
                             <div className="flex justify-between items-center mb-2">
                                 <h2 className="text-sm font-bold text-gray-700">レイアウト設定</h2>
-                                <button 
-                                    onClick={toggleUnit}
-                                    className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded text-gray-600 font-medium transition"
-                                >
+                                <button onClick={toggleUnit} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded text-gray-600 font-medium transition">
                                     単位: {settings.unit}
                                 </button>
                             </div>
                             
-                            {/* 画像の高さ (NumberStepper使用) */}
                             <div>
                                 <label className="block text-sm font-medium text-gray-600 mb-1">画像の高さ</label>
                                 <NumberStepper 
@@ -406,7 +411,6 @@
                             </div>
 
                             <div className="grid grid-cols-2 gap-3">
-                                {/* 余白 (NumberStepper使用) */}
                                 <div>
                                     <label className="block text-sm font-medium text-gray-600 mb-1">余白</label>
                                     <NumberStepper 
@@ -417,7 +421,6 @@
                                         unitLabel={displayUnit}
                                     />
                                 </div>
-                                {/* 間隔 (NumberStepper使用) */}
                                 <div>
                                     <label className="block text-sm font-medium text-gray-600 mb-1">間隔</label>
                                     <NumberStepper 
@@ -432,26 +435,20 @@
 
                             <div className="pt-2">
                                 <label className="flex items-center gap-2 cursor-pointer">
-                                    <input 
-                                        type="checkbox" 
-                                        checked={settings.showGuides} 
-                                        onChange={(e) => setSettings(p => ({...p, showGuides: e.target.checked}))}
-                                        className="rounded text-blue-600 focus:ring-blue-500"
-                                    />
-                                    <span className="text-sm text-gray-600">プレビューに枠線を表示</span>
+                                    <input type="checkbox" checked={settings.showGuides} onChange={(e) => setSettings(p => ({...p, showGuides: e.target.checked}))} className="rounded text-blue-600 focus:ring-blue-500" />
+                                    <span className="text-sm text-gray-600">枠線を表示</span>
                                 </label>
                             </div>
                         </div>
 
-                        {/* Action Buttons */}
                         <div className="space-y-3 pt-2">
                             <label className={`
                                 flex items-center justify-center w-full p-3 rounded-lg border-2 border-dashed cursor-pointer transition-colors
                                 ${isDragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50'}
                             `}
-                            onDragOver={onDragOver}
-                            onDragLeave={onDragLeave}
-                            onDrop={onDrop}
+                            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                            onDragLeave={(e) => { e.preventDefault(); setIsDragging(false); }}
+                            onDrop={(e) => { e.preventDefault(); setIsDragging(false); handleFiles(e.dataTransfer.files); }}
                             >
                                 <input type="file" multiple accept="image/*" className="hidden" onChange={(e) => handleFiles(e.target.files)} />
                                 <div className="text-center">
@@ -465,104 +462,126 @@
                                 disabled={images.length === 0 || isGenerating}
                                 className={`
                                     w-full py-3 px-4 rounded-lg font-bold text-white flex items-center justify-center shadow-md transition-all
-                                    ${images.length === 0 
-                                        ? 'bg-gray-300 cursor-not-allowed' 
-                                        : 'bg-blue-600 hover:bg-blue-700 active:scale-[0.98]'}
+                                    ${images.length === 0 ? 'bg-gray-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 active:scale-[0.98]'}
                                 `}
                             >
                                 {isGenerating ? <LoaderIcon /> : <DownloadIcon />}
                                 {isGenerating ? '生成中...' : 'PDFを作成'}
                             </button>
                         </div>
-
-                        {/* File List */}
-                        <div className="flex-1 overflow-y-auto min-h-[150px] border-t pt-4">
-                             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">選択中の画像 ({images.length})</h3>
+                        
+                        <div className="flex-1 overflow-y-auto min-h-[100px] border-t pt-4">
+                             <div className="flex justify-between items-center mb-2">
+                                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">画像一覧 ({images.length})</h3>
+                                {images.length > 0 && (
+                                    <button onClick={() => setImages([])} className="text-xs text-red-400 hover:text-red-600">全削除</button>
+                                )}
+                             </div>
                              <div className="space-y-2">
                                 {images.map((img) => (
                                     <div key={img.id} className="flex items-center gap-3 bg-gray-50 p-2 rounded border border-gray-100 group">
-                                        <img src={img.preview} alt="" className="w-10 h-10 object-cover rounded bg-white" />
+                                        <img src={img.preview} alt="" className="w-8 h-8 object-cover rounded bg-white" />
                                         <div className="flex-1 min-w-0">
-                                            <p className="text-xs text-gray-700 truncate font-medium">{img.name}</p>
+                                            <p className="text-xs text-gray-700 truncate">{img.name}</p>
                                         </div>
-                                        <button 
-                                            onClick={() => removeImage(img.id)}
-                                            className="text-gray-400 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                                        >
-                                            <TrashIcon />
-                                        </button>
+                                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button onClick={() => rotateImage(img.id)} className="text-gray-400 hover:text-blue-500 p-1" title="回転"><RotateIcon /></button>
+                                            <button onClick={() => removeImage(img.id)} className="text-gray-400 hover:text-red-500 p-1" title="削除"><TrashIcon /></button>
+                                        </div>
                                     </div>
                                 ))}
-                                {images.length === 0 && (
-                                    <p className="text-xs text-gray-400 text-center py-4">まだ画像がありません</p>
-                                )}
                              </div>
                         </div>
                     </div>
 
-                    {/* Right Area: Preview */}
-                    <div className="flex-1 bg-gray-200 rounded-xl overflow-hidden shadow-inner flex flex-col h-[calc(100vh-2rem)]">
-                        <div className="bg-white border-b px-4 py-2 flex justify-between items-center text-xs text-gray-500">
-                            <span>プレビュー (簡易表示)</span>
+                    {/* Preview Area (Paginated) */}
+                    <div className="flex-1 bg-gray-300/50 rounded-xl overflow-hidden shadow-inner flex flex-col h-[calc(100vh-2rem)] border border-gray-200">
+                        <div className="bg-white border-b px-4 py-2 flex justify-between items-center text-xs text-gray-500 shadow-sm z-10">
+                            <span>プレビュー ({layoutPages.length}ページ)</span>
                             <span>A4 / {settings.unit === 'cm' ? 'cm' : 'mm'}</span>
                         </div>
-                        <main className="flex-1 overflow-auto p-8 flex justify-center preview-scroll bg-gray-300/50">
-                            {/* A4 Paper */}
-                            {/* CSS for A4 aspect ratio: 210mm x 297mm = 1 : 1.414 */}
-                            {/* Let's fix width to something readable, say 600px, and calc height */}
-                            {/* Note: This is a VISUAL PREVIEW. It won't perfectly match PDF pagination until we implement complex logic. */}
-                            {/* Currently, we just flow images to show sizes. */}
-                            <div 
-                                className="bg-white shadow-xl relative transition-all duration-300"
-                                style={{
-                                    width: '210mm',
-                                    minHeight: '297mm', // Allow it to grow for the "Continuous" look or fixed page
-                                    // Scale it down to fit screen if needed, but horizontal scroll is okay for detailed work
-                                    padding: `${settings.margin}mm`,
-                                    boxSizing: 'border-box'
-                                }}
-                            >
-                                <div className="flex flex-wrap content-start" style={{ gap: `${settings.gap}mm` }}>
-                                    {images.map((img) => (
+                        <main className="flex-1 overflow-auto p-8 preview-scroll">
+                            <div className="flex flex-col gap-8 items-center min-w-[210mm]">
+                                
+                                {layoutPages.length === 0 && (
+                                    <div className="w-[210mm] h-[297mm] bg-white shadow-xl flex items-center justify-center text-gray-300 rounded-sm">
+                                        <div className="text-center">
+                                            <p className="text-4xl mb-2">📄</p>
+                                            <p>ここにプレビューが表示されます</p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {layoutPages.map((pageItems, pIndex) => (
+                                    <div key={pIndex} className="relative">
+                                        {/* A4 Page */}
                                         <div 
-                                            key={img.id}
-                                            className="relative group transition-all duration-300"
+                                            className="bg-white shadow-xl relative transition-all duration-300 overflow-hidden"
                                             style={{
-                                                height: `${settings.targetHeight}mm`,
-                                                // width is auto based on image aspect ratio
-                                                // HTML img behaves well here
+                                                width: '210mm',
+                                                height: '297mm',
                                             }}
                                         >
-                                            <img 
-                                                src={img.preview} 
-                                                className="h-full w-auto object-contain bg-gray-100"
-                                                style={{
-                                                    outline: settings.showGuides ? '1px dashed #cbd5e1' : 'none'
-                                                }}
-                                            />
-                                            <div className="absolute top-0 right-0 p-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button 
-                                                    onClick={() => removeImage(img.id)}
-                                                    className="bg-red-500 text-white rounded-full p-1 shadow hover:bg-red-600 transform hover:scale-110 z-10 scale-75"
-                                                    title="削除"
+                                            {/* Render Items */}
+                                            {pageItems.map((item) => (
+                                                <div 
+                                                    key={item.id}
+                                                    className="absolute group transition-all duration-300"
+                                                    style={{
+                                                        left: `${item.x + settings.margin}mm`,
+                                                        top: `${item.y + settings.margin}mm`,
+                                                        width: `${item.w}mm`,
+                                                        height: `${item.h}mm`,
+                                                    }}
                                                 >
-                                                    <TrashIcon />
-                                                </button>
-                                            </div>
-                                        </div>
-                                    ))}
+                                                    <img 
+                                                        src={item.preview} 
+                                                        className="w-full h-full object-contain bg-gray-50"
+                                                        style={{
+                                                            outline: settings.showGuides ? '1px dashed #cbd5e1' : 'none'
+                                                        }}
+                                                    />
+                                                    
+                                                    {/* ホバー時の操作ボタン (オーバーレイ) */}
+                                                    <div className="absolute top-0 right-0 p-1 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                                                        <button 
+                                                            onClick={() => rotateImage(item.id)}
+                                                            className="bg-white/90 text-gray-600 rounded shadow p-1 hover:text-blue-600 hover:bg-white transform hover:scale-105 z-10"
+                                                            title="回転"
+                                                        >
+                                                            <RotateIcon />
+                                                        </button>
+                                                        <button 
+                                                            onClick={() => removeImage(item.id)}
+                                                            className="bg-red-500/90 text-white rounded shadow p-1 hover:bg-red-600 transform hover:scale-105 z-10"
+                                                            title="削除"
+                                                        >
+                                                            <TrashIcon />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ))}
 
-                                    {/* Margins Guide (Optional visual aid) */}
-                                    <div 
-                                        className="absolute border border-blue-200 pointer-events-none opacity-30"
-                                        style={{
-                                            left: `${settings.margin * previewScale}px`,
-                                            top: `${settings.margin * previewScale}px`,
-                                            right: `${settings.margin * previewScale}px`,
-                                            bottom: `${settings.margin * previewScale}px`,
-                                        }}
-                                    />
-                                </div>
+                                            {/* Margins Guide (Visual Aid) */}
+                                            {settings.showGuides && (
+                                                <div 
+                                                    className="absolute border border-blue-200 pointer-events-none opacity-20"
+                                                    style={{
+                                                        left: `${settings.margin}mm`,
+                                                        top: `${settings.margin}mm`,
+                                                        width: `calc(100% - ${settings.margin * 2}mm)`,
+                                                        height: `calc(100% - ${settings.margin * 2}mm)`,
+                                                    }}
+                                                />
+                                            )}
+                                        </div>
+                                        
+                                        {/* Page Number */}
+                                        <div className="absolute -bottom-6 w-full text-center text-xs text-gray-500 font-medium">
+                                            Page {pIndex + 1}
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
                         </main>
                     </div>
