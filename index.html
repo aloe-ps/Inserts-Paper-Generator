@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>画像配置＆PDF生成ツール</title>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- jsPDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+    <style>
+        body {
+            background-color: #f3f4f6;
+            font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif;
+        }
+        /* Custom scrollbar for preview area */
+        .preview-scroll::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        .preview-scroll::-webkit-scrollbar-track {
+            background: #e5e7eb; 
+        }
+        .preview-scroll::-webkit-scrollbar-thumb {
+            background: #9ca3af; 
+            border-radius: 4px;
+        }
+        .paper-shadow {
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0,0,0,0.05);
+        }
+        /* Hide number input arrows */
+        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-outer-spin-button { 
+            -webkit-appearance: none; 
+            margin: 0; 
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo } = React;
+        const { jsPDF } = window.jspdf;
+
+        // アイコン
+        const UploadIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>;
+        const TrashIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>;
+        const FileIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>;
+        const DownloadIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>;
+        const LoaderIcon = () => <svg className="animate-spin" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>;
+
+        // 用紙サイズ定義 (mm)
+        const PAPER_SIZES = {
+            'A4': { width: 210, height: 297 },
+            'A3': { width: 297, height: 420 },
+            'B5': { width: 182, height: 257 },
+            'B4': { width: 257, height: 364 },
+            'Letter': { width: 215.9, height: 279.4 },
+        };
+
+        const App = () => {
+            // --- State ---
+            const [images, setImages] = useState([]); // { id, src, width, height, originalName }
+            const [isProcessing, setIsProcessing] = useState(false);
+            
+            const [settings, setSettings] = useState({
+                paperSize: 'A4',
+                targetHeight: 80, // mm
+                margin: 10,       // mm
+                gap: 5,           // mm
+            });
+            
+            // UI用状態
+            const [displayUnit, setDisplayUnit] = useState('mm'); // 'mm' | 'cm'
+            const [previewScale, setPreviewScale] = useState(1.0);
+            
+            const [layoutPages, setLayoutPages] = useState([]);
+            const previewContainerRef = useRef(null);
+
+            // --- 画像処理ロジック ---
+            const processImageFile = (file) => {
+                return new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const img = new Image();
+                        img.onload = () => {
+                            let width = img.width;
+                            let height = img.height;
+                            let src = img.src;
+
+                            // 横長（Width > Height）の場合、90度回転させて縦長にする
+                            if (width > height) {
+                                const canvas = document.createElement('canvas');
+                                canvas.width = height;
+                                canvas.height = width;
+                                const ctx = canvas.getContext('2d');
+                                
+                                // キャンバスの中心を原点に移動し、回転
+                                ctx.translate(canvas.width / 2, canvas.height / 2);
+                                ctx.rotate(90 * Math.PI / 180);
+                                ctx.drawImage(img, -width / 2, -height / 2);
+                                
+                                src = canvas.toDataURL('image/jpeg', 0.9);
+                                // 幅と高さを入れ替え
+                                [width, height] = [height, width];
+                            }
+
+                            resolve({
+                                id: Math.random().toString(36).substr(2, 9),
+                                src: src,
+                                width: width,
+                                height: height,
+                                originalName: file.name
+                            });
+                        };
+                        img.src = e.target.result;
+                    };
+                    reader.readAsDataURL(file);
+                });
+            };
+
+            const handleFileUpload = async (e) => {
+                const files = Array.from(e.target.files);
+                if (files.length === 0) return;
+
+                setIsProcessing(true);
+                const processedImages = await Promise.all(files.map(processImageFile));
+                setImages(prev => [...prev, ...processedImages]);
+                setIsProcessing(false);
+                e.target.value = ''; // Reset input
+            };
+
+            const removeImage = (id) => {
+                setImages(prev => prev.filter(img => img.id !== id));
+            };
+
+            const clearAllImages = () => {
+                if(confirm("すべての画像を削除しますか？")) {
+                    setImages([]);
+                }
+            };
+
+            // --- レイアウト計算ロジック ---
+            useEffect(() => {
+                if (images.length === 0) {
+                    setLayoutPages([]);
+                    return;
+                }
+
+                const paper = PAPER_SIZES[settings.paperSize];
+                const contentWidth = paper.width - (settings.margin * 2);
+                const contentHeight = paper.height - (settings.margin * 2);
+                
+                const pages = [];
+                let currentPage = { items: [] };
+                let currentX = settings.margin;
+                let currentY = settings.margin;
+
+                images.forEach((img) => {
+                    const scaleFactor = settings.targetHeight / img.height;
+                    const displayWidth = img.width * scaleFactor;
+                    const displayHeight = settings.targetHeight;
+
+                    // 現在の行に入るかチェック
+                    if (currentX + displayWidth > paper.width - settings.margin) {
+                        currentX = settings.margin;
+                        currentY += displayHeight + settings.gap;
+                    }
+
+                    // 現在のページに入るかチェック
+                    if (currentY + displayHeight > paper.height - settings.margin) {
+                        pages.push(currentPage);
+                        currentPage = { items: [] };
+                        currentX = settings.margin;
+                        currentY = settings.margin;
+                    }
+
+                    currentPage.items.push({
+                        ...img,
+                        x: currentX,
+                        y: currentY,
+                        renderWidth: displayWidth,
+                        renderHeight: displayHeight
+                    });
+
+                    currentX += displayWidth + settings.gap;
+                });
+
+                if (currentPage.items.length > 0) {
+                    pages.push(currentPage);
+                }
+
+                setLayoutPages(pages);
+
+            }, [images, settings]);
+
+            // --- プレビューのレスポンシブスケール計算 ---
+            useEffect(() => {
+                const updateScale = () => {
+                    const container = previewContainerRef.current;
+                    if (!container) return;
+                    
+                    const paper = PAPER_SIZES[settings.paperSize];
+                    // コンテナのパディング分を引く (px-8 py-8 = 32px*2 = 64px)
+                    const paddingX = 64;
+                    const paddingY = 64;
+                    
+                    const availableWidth = container.clientWidth - paddingX;
+                    const availableHeight = container.clientHeight - paddingY;
+
+                    if (availableWidth <= 0 || availableHeight <= 0) return;
+
+                    // ページ全体が収まるように比率を計算 (Fit Page)
+                    const scaleW = availableWidth / paper.width;
+                    const scaleH = availableHeight / paper.height;
+                    
+                    // 小さい方の倍率を採用（はみ出さないように）
+                    // ただし極端に大きくならないよう上限を設定
+                    let newScale = Math.min(scaleW, scaleH);
+                    
+                    // モバイルなどで極端に小さくなりすぎるのを防ぐ場合はここで調整可能
+                    // 今回は「画面に応じて変化」なのでFitさせる
+                    
+                    setPreviewScale(newScale);
+                };
+
+                // ResizeObserverでコンテナサイズの変更を監視
+                const observer = new ResizeObserver(updateScale);
+                if (previewContainerRef.current) {
+                    observer.observe(previewContainerRef.current);
+                }
+                
+                // 初回実行
+                updateScale();
+
+                return () => observer.disconnect();
+            }, [settings.paperSize]); // 用紙サイズが変わったら再計算
+
+
+            // --- 単位変換ヘルパー ---
+            // mm -> 表示値
+            const toDisplay = (mmVal) => {
+                if (displayUnit === 'cm') {
+                    // 小数点第2位までなど丸め処理を考慮
+                    return Math.round((mmVal / 10) * 100) / 100;
+                }
+                return mmVal;
+            };
+
+            // 表示値 -> mm
+            const fromDisplay = (dispVal) => {
+                if (displayUnit === 'cm') {
+                    return dispVal * 10;
+                }
+                return dispVal;
+            };
+
+            const handleSettingChange = (key, rawVal) => {
+                const numVal = parseFloat(rawVal);
+                if (isNaN(numVal)) return;
+                
+                setSettings(prev => ({
+                    ...prev,
+                    [key]: fromDisplay(numVal)
+                }));
+            };
+
+
+            // --- PDF生成 ---
+            const generatePDF = () => {
+                if (layoutPages.length === 0) return;
+
+                const paper = PAPER_SIZES[settings.paperSize];
+                const doc = new jsPDF({
+                    orientation: 'portrait',
+                    unit: 'mm',
+                    format: [paper.width, paper.height]
+                });
+
+                layoutPages.forEach((page, pageIndex) => {
+                    if (pageIndex > 0) {
+                        doc.addPage();
+                    }
+
+                    page.items.forEach(item => {
+                        try {
+                            doc.addImage(item.src, 'JPEG', item.x, item.y, item.renderWidth, item.renderHeight);
+                        } catch (err) {
+                            console.error("Image add error", err);
+                        }
+                    });
+                });
+
+                doc.save(`layout_${settings.paperSize}_${new Date().toISOString().slice(0,10)}.pdf`);
+            };
+
+            return (
+                <div className="flex flex-col h-screen overflow-hidden">
+                    {/* Header */}
+                    <header className="bg-white border-b px-6 py-4 flex items-center justify-between shadow-sm z-10 flex-shrink-0">
+                        <div className="flex items-center gap-2">
+                            <FileIcon className="text-blue-600" />
+                            <h1 className="text-xl font-bold text-gray-800 hidden sm:block">画像配置PDFメーカー</h1>
+                            <h1 className="text-lg font-bold text-gray-800 sm:hidden">PDFメーカー</h1>
+                        </div>
+                        <div className="flex gap-3">
+                            <button 
+                                onClick={clearAllImages}
+                                disabled={images.length === 0}
+                                className="px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded transition disabled:opacity-50 whitespace-nowrap"
+                            >
+                                全削除
+                            </button>
+                            <button 
+                                onClick={generatePDF}
+                                disabled={images.length === 0}
+                                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded font-medium hover:bg-blue-700 transition shadow disabled:opacity-50 disabled:cursor-not-allowed text-sm whitespace-nowrap"
+                            >
+                                <DownloadIcon size={16} />
+                                <span className="hidden sm:inline">PDFをダウンロード</span>
+                                <span className="sm:hidden">保存</span>
+                            </button>
+                        </div>
+                    </header>
+
+                    <div className="flex flex-1 overflow-hidden">
+                        {/* Sidebar */}
+                        <aside className="w-80 bg-white border-r flex flex-col z-10 shadow-[4px_0_24px_rgba(0,0,0,0.02)] flex-shrink-0 overflow-y-auto custom-scrollbar">
+                            <div className="p-5 space-y-6">
+                                
+                                {/* Upload Section */}
+                                <div>
+                                    <label className="block mb-2 font-bold text-gray-700">画像の追加</label>
+                                    <div className="relative group">
+                                        <input 
+                                            type="file" 
+                                            multiple 
+                                            accept="image/*"
+                                            onChange={handleFileUpload}
+                                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                        />
+                                        <div className="border-2 border-dashed border-blue-200 bg-blue-50 rounded-lg p-6 flex flex-col items-center justify-center text-blue-600 group-hover:bg-blue-100 group-hover:border-blue-300 transition">
+                                            {isProcessing ? (
+                                                <div className="flex flex-col items-center">
+                                                    <LoaderIcon className="mb-2 text-blue-500" />
+                                                    <span className="text-sm">処理中...</span>
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    <UploadIcon className="mb-2" />
+                                                    <span className="text-sm font-medium">クリックして選択</span>
+                                                </>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <p className="text-xs text-gray-500 mt-2">※ 横長の画像は自動で縦向きに回転します</p>
+                                </div>
+
+                                <hr className="border-gray-100" />
+
+                                {/* Settings Section */}
+                                <div className="space-y-4">
+                                    <div className="flex items-center justify-between">
+                                        <h2 className="font-bold text-gray-700">設定</h2>
+                                        
+                                        {/* Unit Toggle */}
+                                        <div className="bg-gray-100 p-1 rounded-lg flex text-xs font-medium">
+                                            <button 
+                                                onClick={() => setDisplayUnit('mm')}
+                                                className={`px-3 py-1 rounded ${displayUnit === 'mm' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                                            >
+                                                mm
+                                            </button>
+                                            <button 
+                                                onClick={() => setDisplayUnit('cm')}
+                                                className={`px-3 py-1 rounded ${displayUnit === 'cm' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                                            >
+                                                cm
+                                            </button>
+                                        </div>
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-600 mb-1">用紙サイズ</label>
+                                        <select 
+                                            value={settings.paperSize}
+                                            onChange={(e) => setSettings({...settings, paperSize: e.target.value})}
+                                            className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                                        >
+                                            {Object.keys(PAPER_SIZES).map(size => (
+                                                <option key={size} value={size}>{size}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-600 mb-1">画像の高さ ({displayUnit})</label>
+                                        <div className="flex items-center">
+                                            <input 
+                                                type="number"
+                                                step={displayUnit === 'cm' ? "0.1" : "1"}
+                                                value={toDisplay(settings.targetHeight)}
+                                                onChange={(e) => handleSettingChange('targetHeight', e.target.value)}
+                                                className="w-full border border-gray-300 rounded-l px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                                            />
+                                            <span className="bg-gray-100 border border-l-0 border-gray-300 rounded-r px-3 py-2 text-sm text-gray-500 w-12 text-center">{displayUnit}</span>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-xs font-medium text-gray-500 mb-1">余白 ({displayUnit})</label>
+                                            <input 
+                                                type="number"
+                                                step={displayUnit === 'cm' ? "0.1" : "1"}
+                                                value={toDisplay(settings.margin)}
+                                                onChange={(e) => handleSettingChange('margin', e.target.value)}
+                                                className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-gray-500 mb-1">間隔 ({displayUnit})</label>
+                                            <input 
+                                                type="number"
+                                                step={displayUnit === 'cm' ? "0.1" : "1"}
+                                                value={toDisplay(settings.gap)}
+                                                onChange={(e) => handleSettingChange('gap', e.target.value)}
+                                                className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <hr className="border-gray-100" />
+                                
+                                <div className="text-sm text-gray-600 flex justify-between">
+                                    <span>登録画像数:</span>
+                                    <span className="font-bold">{images.length}枚</span>
+                                </div>
+                            </div>
+                        </aside>
+
+                        {/* Main Preview Area */}
+                        <main 
+                            ref={previewContainerRef}
+                            className="flex-1 bg-gray-100 overflow-auto p-8 flex flex-col items-center gap-8 preview-scroll relative"
+                        >
+                            {images.length === 0 && (
+                                <div className="absolute inset-0 flex items-center justify-center text-gray-400 pointer-events-none">
+                                    <div className="text-center">
+                                        <FileIcon className="mx-auto h-12 w-12 opacity-20 mb-3" />
+                                        <p>画像を追加するとプレビューが表示されます</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {layoutPages.map((page, pageIndex) => {
+                                const paper = PAPER_SIZES[settings.paperSize];
+                                return (
+                                    <div 
+                                        key={pageIndex}
+                                        className="bg-white paper-shadow relative transition-all duration-200 origin-center"
+                                        style={{
+                                            // プレビューのスケールを適用
+                                            width: `${paper.width * previewScale}px`,
+                                            height: `${paper.height * previewScale}px`,
+                                            // スケールしてもレイアウトが崩れないように、minサイズも固定
+                                            minWidth: `${paper.width * previewScale}px`,
+                                            minHeight: `${paper.height * previewScale}px`,
+                                        }}
+                                    >
+                                        {/* Page Number */}
+                                        <div className="absolute -top-6 left-0 text-xs text-gray-400 font-bold whitespace-nowrap">
+                                            Page {pageIndex + 1}
+                                        </div>
+                                        
+                                        {/* Render Images */}
+                                        {page.items.map((item) => (
+                                            <div
+                                                key={item.id}
+                                                className="absolute group bg-gray-50 border border-gray-100"
+                                                style={{
+                                                    left: `${item.x * previewScale}px`,
+                                                    top: `${item.y * previewScale}px`,
+                                                    width: `${item.renderWidth * previewScale}px`,
+                                                    height: `${item.renderHeight * previewScale}px`,
+                                                    backgroundImage: `url(${item.src})`,
+                                                    backgroundSize: 'contain',
+                                                    backgroundRepeat: 'no-repeat',
+                                                    backgroundPosition: 'center'
+                                                }}
+                                            >
+                                                {/* Hover Delete Button */}
+                                                <button
+                                                    onClick={() => removeImage(item.id)}
+                                                    className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 z-10 scale-75"
+                                                    title="削除"
+                                                >
+                                                    <TrashIcon />
+                                                </button>
+                                            </div>
+                                        ))}
+
+                                        {/* Margins Guide (Optional visual aid) */}
+                                        <div 
+                                            className="absolute border border-blue-200 pointer-events-none opacity-30"
+                                            style={{
+                                                left: `${settings.margin * previewScale}px`,
+                                                top: `${settings.margin * previewScale}px`,
+                                                right: `${settings.margin * previewScale}px`,
+                                                bottom: `${settings.margin * previewScale}px`,
+                                            }}
+                                        />
+                                    </div>
+                                );
+                            })}
+                        </main>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
