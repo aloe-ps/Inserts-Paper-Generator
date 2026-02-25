@@ -119,13 +119,19 @@
             </svg>
         );
 
+        const DragHandleIcon = ({ className = "w-4 h-4" }) => (
+            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 8h16M4 16h16"></path>
+            </svg>
+        );
+
+
         // --- Components ---
 
         const NumberStepper = ({ value, onChange, step, min = 0, unitLabel, disabled = false, defaultValue }) => {
             const [localValue, setLocalValue] = useState(value);
             const [isFocused, setIsFocused] = useState(false);
 
-            // フォーカス外の時のみ親の変更をローカルに同期
             useEffect(() => {
                 if (!isFocused && parseFloat(localValue) !== value) {
                     setLocalValue(value);
@@ -136,7 +142,6 @@
                 const val = e.target.value;
                 setLocalValue(val);
                 
-                // 空白や無効な文字列の場合はデフォルト値を親に送信しつつ、入力欄は空を維持
                 if (val === '' || isNaN(parseFloat(val))) {
                     onChange(defaultValue);
                 } else {
@@ -207,10 +212,51 @@
             );
         };
 
+        // ドラッグ＆ドロップで順番を入れ替えられるプレビュー画像
+        const PreviewImage = ({ item, settings, previewScale, MM_TO_PX, onRotate, onRemove, onDragStart, onDragOver, onDrop, draggedIndex }) => {
+            const finalX = item.baseX + settings.margin;
+            const finalY = item.baseY + settings.margin;
+            const isBeingDragged = draggedIndex === item.originalIndex;
+
+            return (
+                <div 
+                    draggable
+                    onDragStart={(e) => onDragStart(e, item.originalIndex)}
+                    onDragOver={(e) => onDragOver(e, item.originalIndex)}
+                    onDrop={(e) => onDrop(e, item.originalIndex)}
+                    className={`absolute group transition-shadow duration-300 ${isBeingDragged ? 'z-50 shadow-2xl opacity-50' : 'z-10 cursor-grab hover:z-40'}`}
+                    style={{
+                        left: `${finalX * MM_TO_PX}px`,
+                        top: `${finalY * MM_TO_PX}px`,
+                        width: `${item.w * MM_TO_PX}px`,
+                        height: `${item.h * MM_TO_PX}px`,
+                        transition: isBeingDragged ? 'none' : 'left 0.3s ease, top 0.3s ease', // アニメーションで移動
+                    }}
+                >
+                    <img 
+                        src={item.preview} 
+                        className="w-full h-full bg-gray-50 pointer-events-none"
+                        style={{
+                            objectFit: settings.ignoreAspectRatio ? 'fill' : 'contain',
+                            outline: settings.showGuides ? '1px dashed #cbd5e1' : 'none',
+                        }}
+                    />
+                    <div className="absolute top-0 right-0 p-1 flex gap-1 transition-opacity opacity-100 md:opacity-0 md:group-hover:opacity-100">
+                        <button onClick={(e) => { e.stopPropagation(); onRotate(item.id); }} className="bg-white/90 text-gray-600 rounded shadow p-1 hover:text-blue-600 hover:bg-white transform active:scale-95 z-10" title="回転"><RotateIcon /></button>
+                        <button onClick={(e) => { e.stopPropagation(); onRemove(item.id); }} className="bg-red-500/90 text-white rounded shadow p-1 hover:bg-red-600 transform active:scale-95 z-10" title="削除"><TrashIcon /></button>
+                    </div>
+                </div>
+            );
+        };
+
+
         const App = () => {
             const [images, setImages] = useState([]);
-            const [isDragging, setIsDragging] = useState(false);
+            const [isFileDragging, setIsFileDragging] = useState(false);
             const [isGenerating, setIsGenerating] = useState(false);
+            
+            // リストおよびプレビューでドラッグ中の画像のインデックス
+            const [draggedIndex, setDraggedIndex] = useState(null);
             
             const [settings, setSettings] = useState(DEFAULT_SETTINGS);
 
@@ -236,7 +282,7 @@
                 if(confirm('レイアウト設定を初期値に戻しますか？')) {
                     setSettings(prev => ({
                         ...DEFAULT_SETTINGS,
-                        unit: prev.unit // 単位は維持する
+                        unit: prev.unit
                     }));
                 }
             };
@@ -362,6 +408,31 @@
                 });
             };
 
+            // --- Drag & Drop (並び替え) ---
+            const handleDragStart = (e, index) => {
+                setDraggedIndex(index);
+                e.dataTransfer.effectAllowed = 'move';
+            };
+
+            const handleDragOver = (e, index) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+            };
+
+            const handleDrop = (e, targetIndex) => {
+                e.preventDefault();
+                if (draggedIndex === null || draggedIndex === targetIndex) return;
+
+                setImages(prev => {
+                    const newImages = [...prev];
+                    const [removed] = newImages.splice(draggedIndex, 1);
+                    newImages.splice(targetIndex, 0, removed);
+                    return newImages;
+                });
+                setDraggedIndex(null);
+            };
+
+            // --- Layout Calculation ---
             const layoutPages = useMemo(() => {
                 const pageW = currentPaper.width;
                 const pageH = currentPaper.height;
@@ -387,9 +458,8 @@
                     currentY = 0;
                 };
 
-                images.forEach((img) => {
+                images.forEach((img, index) => {
                     const printH = targetH;
-                    // アスペクト比無視設定に応じて横幅の計算を切り替え
                     const printW = settings.ignoreAspectRatio ? targetW : (targetH * img.aspectRatio);
 
                     if (currentX + printW > contentW && currentX > 0) {
@@ -403,8 +473,9 @@
 
                     currentPageItems.push({
                         ...img,
-                        x: currentX,
-                        y: currentY,
+                        originalIndex: index, // 並び替えの参照用インデックス
+                        baseX: currentX,
+                        baseY: currentY,
                         w: printW,
                         h: printH
                     });
@@ -454,11 +525,14 @@
                             ctx.drawImage(imgObj, 0, 0);
                             const dataUrl = canvas.toDataURL('image/jpeg', 0.90);
 
+                            const finalX = item.baseX + margin;
+                            const finalY = item.baseY + margin;
+
                             doc.addImage(
                                 dataUrl, 
                                 'JPEG', 
-                                item.x + margin, 
-                                item.y + margin, 
+                                finalX, 
+                                finalY, 
                                 item.w, 
                                 item.h
                             );
@@ -608,11 +682,11 @@
                         <div className="space-y-3 pt-2">
                             <label className={`
                                 flex items-center justify-center w-full p-3 rounded-lg border-2 border-dashed cursor-pointer transition-colors
-                                ${isDragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50'}
+                                ${isFileDragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50'}
                             `}
-                            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-                            onDragLeave={(e) => { e.preventDefault(); setIsDragging(false); }}
-                            onDrop={(e) => { e.preventDefault(); setIsDragging(false); handleFiles(e.dataTransfer.files); }}
+                            onDragOver={(e) => { e.preventDefault(); setIsFileDragging(true); }}
+                            onDragLeave={(e) => { e.preventDefault(); setIsFileDragging(false); }}
+                            onDrop={(e) => { e.preventDefault(); setIsFileDragging(false); handleFiles(e.dataTransfer.files); }}
                             >
                                 <input type="file" multiple accept="image/*" className="hidden" onChange={(e) => handleFiles(e.target.files)} />
                                 <div className="text-center">
@@ -635,19 +709,30 @@
                         </div>
                         
                         {/* File List */}
-                        <div className="flex-1 overflow-y-auto max-h-[150px] md:max-h-none md:min-h-[100px] border-t pt-4">
+                        <div className="flex-1 overflow-y-auto max-h-[250px] md:max-h-none md:min-h-[100px] border-t pt-4">
                              <div className="flex justify-between items-center mb-2">
-                                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">画像一覧 ({images.length})</h3>
+                                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1">画像一覧 ({images.length})</h3>
                                 {images.length > 0 && (
                                     <button onClick={clearImages} className="text-xs flex items-center gap-1 bg-red-50 text-red-500 hover:bg-red-100 px-2 py-1 rounded transition">
                                         <TrashIcon className="w-3 h-3" /> 全消去
                                     </button>
                                 )}
                              </div>
-                             <div className="space-y-2">
-                                {images.map((img) => (
-                                    <div key={img.id} className="flex items-center gap-3 bg-gray-50 p-2 rounded border border-gray-100 group">
-                                        <img src={img.preview} alt="" className="w-8 h-8 object-cover rounded bg-white" />
+                             {images.length > 0 && <p className="text-[10px] text-gray-400 mb-2">※ドラッグ＆ドロップで順番を入れ替えられます</p>}
+                             <div className="space-y-2 pb-2">
+                                {images.map((img, index) => (
+                                    <div 
+                                        key={img.id} 
+                                        draggable
+                                        onDragStart={(e) => handleDragStart(e, index)}
+                                        onDragOver={(e) => handleDragOver(e, index)}
+                                        onDrop={(e) => handleDrop(e, index)}
+                                        className={`flex items-center gap-3 bg-gray-50 p-2 rounded border group cursor-move hover:bg-gray-100 transition-colors ${draggedIndex === index ? 'opacity-50 border-blue-400' : 'border-gray-100'}`}
+                                    >
+                                        <div className="text-gray-400 cursor-grab active:cursor-grabbing">
+                                            <DragHandleIcon />
+                                        </div>
+                                        <img src={img.preview} alt="" className="w-8 h-8 object-cover rounded bg-white pointer-events-none" />
                                         <div className="flex-1 min-w-0">
                                             <p className="text-xs text-gray-700 truncate">{img.name}</p>
                                         </div>
@@ -662,9 +747,10 @@
                     </div>
 
                     {/* Preview Area */}
-                    <div className="flex-1 bg-gray-300/50 rounded-xl overflow-hidden shadow-inner flex flex-col md:h-[calc(100vh-2rem)] h-[500px] border border-gray-200">
+                    <div className="flex-1 bg-gray-300/50 rounded-xl overflow-hidden shadow-inner flex flex-col md:h-[calc(100vh-2rem)] h-[500px] border border-gray-200 relative">
                         <div className="bg-white border-b px-4 py-2 flex justify-between items-center text-xs text-gray-500 shadow-sm z-10">
                             <span>プレビュー ({layoutPages.length}ページ)</span>
+                            <span className="hidden md:inline">※画像をドラッグして順番を入れ替えられます</span>
                             <span>{currentPaper.name} / {settings.unit === 'cm' ? 'cm' : 'mm'}</span>
                         </div>
                         
@@ -698,33 +784,8 @@
                                             marginBottom: pIndex === layoutPages.length - 1 ? 0 : `-${(1 - previewScale) * (currentPaper.height * MM_TO_PX)}px`
                                         }}
                                     >
-                                        <div className="bg-white shadow-xl relative overflow-hidden h-full w-full">
-                                            {pageItems.map((item) => (
-                                                <div 
-                                                    key={item.id}
-                                                    className="absolute group transition-all duration-300"
-                                                    style={{
-                                                        left: `${(item.x + settings.margin) * MM_TO_PX}px`,
-                                                        top: `${(item.y + settings.margin) * MM_TO_PX}px`,
-                                                        width: `${item.w * MM_TO_PX}px`,
-                                                        height: `${item.h * MM_TO_PX}px`,
-                                                    }}
-                                                >
-                                                    <img 
-                                                        src={item.preview} 
-                                                        className="w-full h-full bg-gray-50"
-                                                        style={{
-                                                            objectFit: settings.ignoreAspectRatio ? 'fill' : 'contain',
-                                                            outline: settings.showGuides ? '1px dashed #cbd5e1' : 'none'
-                                                        }}
-                                                    />
-                                                    <div className="absolute top-0 right-0 p-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity flex gap-1">
-                                                        <button onClick={() => rotateImage(item.id)} className="bg-white/90 text-gray-600 rounded shadow p-1 hover:text-blue-600 hover:bg-white transform active:scale-95 z-10" title="回転"><RotateIcon /></button>
-                                                        <button onClick={() => removeImage(item.id)} className="bg-red-500/90 text-white rounded shadow p-1 hover:bg-red-600 transform active:scale-95 z-10" title="削除"><TrashIcon /></button>
-                                                    </div>
-                                                </div>
-                                            ))}
-
+                                        <div className="bg-white shadow-xl relative h-full w-full">
+                                            {/* ガイドライン */}
                                             {settings.showGuides && (
                                                 <div className="absolute border border-blue-200 pointer-events-none opacity-20"
                                                     style={{
@@ -735,8 +796,25 @@
                                                     }}
                                                 />
                                             )}
+
+                                            {/* ドラッグ可能な画像群 */}
+                                            {pageItems.map((item) => (
+                                                <PreviewImage 
+                                                    key={item.id}
+                                                    item={item}
+                                                    settings={settings}
+                                                    previewScale={previewScale}
+                                                    MM_TO_PX={MM_TO_PX}
+                                                    onRotate={rotateImage}
+                                                    onRemove={removeImage}
+                                                    onDragStart={handleDragStart}
+                                                    onDragOver={handleDragOver}
+                                                    onDrop={handleDrop}
+                                                    draggedIndex={draggedIndex}
+                                                />
+                                            ))}
                                         </div>
-                                        <div className="absolute -bottom-10 w-full text-center text-lg text-gray-500 font-medium">
+                                        <div className="absolute -bottom-10 w-full text-center text-lg text-gray-500 font-medium pointer-events-none">
                                             {currentPaper.name} - Page {pIndex + 1}
                                         </div>
                                     </div>
